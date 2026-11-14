@@ -29,7 +29,8 @@ const view = computed<View>({
 const brands = ref<BrandRow[]>([])
 const search = ref('')
 const status = ref('all')
-const statusOptions = [{ label: 'All statuses', value: 'all' }, ...selectOptions(BRAND_STATUSES)]
+// archived brands are hidden unless this is set to Archived
+const statusOptions = [{ label: 'All statuses', value: 'all' }, ...selectOptions(BRAND_STATUSES), { label: 'Archived', value: 'archived' }]
 
 async function loadBrands() {
   // In pages: the Data API returns at most 1,000 rows per request, and imports can bring in more.
@@ -51,12 +52,13 @@ await Promise.all([load(), loadBrands()])
 // A brand with no value for a filtered field (e.g. no Trybe score yet) is left out by that filter.
 const DEFAULT_FILTERS = {
   minScore: 0,
-  payModel: 'all',
+  payType: 'all',
   minCommission: 0,
   minFlat: 0,
   category: 'all',
   channel: 'all',
-  matched: 'all'
+  matched: 'all',
+  starred: false
 }
 const filters = reactive({ ...DEFAULT_FILTERS })
 const activeFilters = computed(() =>
@@ -65,7 +67,7 @@ const activeFilters = computed(() =>
 const clearFilters = () => Object.assign(filters, DEFAULT_FILTERS)
 
 const scoreOptions = [{ label: 'Any score', value: 0 }, ...[50, 60, 70, 80, 90].map(n => ({ label: `${n}+`, value: n }))]
-const payOptions = [{ label: 'Any pay model', value: 'all' }, ...PAY_MODELS, { label: 'Not set', value: 'none' }]
+const payOptions = [{ label: 'Any income', value: 'all' }, ...PAY_TYPES.map(type => ({ label: type.label, value: type.value })), { label: 'Not set', value: 'none' }]
 const commissionOptions = [{ label: 'Any commission', value: 0 }, ...[5, 10, 15, 20, 30].map(n => ({ label: `${n}%+`, value: n }))]
 const flatOptions = [{ label: 'Any flat fee', value: 0 }, ...[10, 25, 50, 100, 250].map(n => ({ label: `${n}+ per video`, value: n }))]
 const matchedOptions = [
@@ -98,6 +100,8 @@ const sortOptions = [
   { label: 'Trybe score', value: 'score' },
   { label: 'Commission', value: 'commission' },
   { label: 'Flat fee', value: 'flat' },
+  { label: 'Retainer', value: 'retainer' },
+  { label: 'Ad spend', value: 'ad_spend' },
   { label: 'Newest', value: 'newest' }
 ]
 
@@ -106,10 +110,13 @@ const filtered = computed(() => {
   const list = brands.value.filter((brand) => {
     const data = trybe(brand)
     // the board's columns are the statuses, so it ignores the status filter
-    return (view.value === 'board' || status.value === 'all' || brand.status === status.value)
+    const archivedView = status.value === 'archived' && view.value !== 'board'
+    return (archivedView ? brand.archived_at !== null : brand.archived_at === null)
+      && (view.value === 'board' || archivedView || status.value === 'all' || brand.status === status.value)
+      && (!filters.starred || brand.starred)
       && (!term || brand.name.toLowerCase().includes(term))
       && (!filters.minScore || (brand.trybe_score !== null && Number(brand.trybe_score) >= filters.minScore))
-      && (filters.payModel === 'all' || (filters.payModel === 'none' ? !brand.pay_model : brand.pay_model === filters.payModel))
+      && (filters.payType === 'all' || (filters.payType === 'none' ? !brand.pay_types.length : brand.pay_types.includes(filters.payType)))
       && (!filters.minCommission || (brand.commission_pct !== null && Number(brand.commission_pct) >= filters.minCommission))
       && (!filters.minFlat || (brand.flat_fee !== null && Number(brand.flat_fee) >= filters.minFlat))
       && (filters.category === 'all' || (data.categories ?? []).includes(filters.category))
@@ -126,6 +133,8 @@ const filtered = computed(() => {
     score: desc(brand => brand.trybe_score === null ? null : Number(brand.trybe_score)),
     commission: desc(brand => brand.commission_pct === null ? null : Number(brand.commission_pct)),
     flat: desc(brand => brand.flat_fee === null ? null : Number(brand.flat_fee)),
+    retainer: desc(brand => brand.retainer_fee === null ? null : Number(brand.retainer_fee)),
+    ad_spend: desc(brand => brand.ad_spend_pct === null ? null : Number(brand.ad_spend_pct)),
     newest: (a, b) => b.created_at.localeCompare(a.created_at)
   }
   return list.sort(sorters[sort.value] ?? sorters.name)
@@ -157,6 +166,16 @@ async function moveBrand(brand: BrandRow, next: string) {
   if (error) {
     brand.status = before
     toast.add({ title: `Couldn't move ${brand.name}`, description: error.message, color: 'error' })
+  }
+}
+
+/** Star or unstar a brand, straight away (put back if saving fails). */
+async function toggleStar(brand: BrandRow) {
+  brand.starred = !brand.starred
+  const { error } = await db.from('brands').update({ starred: brand.starred }).eq('id', brand.id)
+  if (error) {
+    brand.starred = !brand.starred
+    toast.add({ title: `Couldn't star ${brand.name}`, description: error.message, color: 'error' })
   }
 }
 
@@ -236,6 +255,16 @@ async function save() {
           <USelect v-if="view !== 'board'" v-model="status" :items="statusOptions" class="w-36" />
           <USelect v-model="sort" :items="sortOptions" icon="i-lucide-arrow-up-down" class="w-40" />
 
+          <UButton
+            icon="i-lucide-star"
+            label="Starred"
+            :color="filters.starred ? 'warning' : 'neutral'"
+            :variant="filters.starred ? 'soft' : 'subtle'"
+            :aria-pressed="filters.starred"
+            :ui="{ leadingIcon: filters.starred ? 'fill-current' : undefined }"
+            @click="filters.starred = !filters.starred"
+          />
+
           <UPopover :content="{ align: 'start' }">
             <UButton
               icon="i-lucide-sliders-horizontal"
@@ -248,8 +277,8 @@ async function save() {
                 <UFormField label="Trybe score">
                   <USelect v-model="filters.minScore" :items="scoreOptions" class="w-full" />
                 </UFormField>
-                <UFormField label="Pay model">
-                  <USelect v-model="filters.payModel" :items="payOptions" class="w-full" />
+                <UFormField label="Income">
+                  <USelect v-model="filters.payType" :items="payOptions" class="w-full" />
                 </UFormField>
                 <div class="grid grid-cols-2 gap-3">
                   <UFormField label="Commission">
@@ -323,7 +352,11 @@ async function save() {
               >
               <span class="truncate">{{ brand.name }}</span>
             </h2>
-            <UBadge :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
+            <div class="flex shrink-0 items-center gap-1">
+              <BrandStar :starred="brand.starred" :name="brand.name" @toggle="toggleStar(brand)" />
+              <UBadge v-if="brand.archived_at" label="Archived" color="neutral" variant="outline" />
+              <UBadge v-else :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
+            </div>
           </div>
           <p class="mt-1 text-sm text-muted">
             {{ brand.products.length }} product{{ brand.products.length === 1 ? '' : 's' }}
@@ -353,6 +386,9 @@ async function save() {
         <table class="w-full text-left text-sm">
           <thead class="border-b border-default bg-elevated/50 text-xs text-muted">
             <tr>
+              <th class="w-8 px-1 py-2">
+                <span class="sr-only">Starred</span>
+              </th>
               <th class="px-3 py-2 font-medium">
                 Brand
               </th>
@@ -380,6 +416,9 @@ async function save() {
               class="cursor-pointer hover:bg-elevated/50"
               @click="navigateTo(`/brands/${brand.id}`)"
             >
+              <td class="px-1 py-2">
+                <BrandStar :starred="brand.starred" :name="brand.name" @toggle="toggleStar(brand)" />
+              </td>
               <td class="px-3 py-2">
                 <NuxtLink :to="`/brands/${brand.id}`" class="flex min-w-0 items-center gap-2 font-medium text-highlighted" @click.stop>
                   <img
@@ -394,7 +433,8 @@ async function save() {
                 </NuxtLink>
               </td>
               <td class="px-3 py-2">
-                <UBadge :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
+                <UBadge v-if="brand.archived_at" label="Archived" color="neutral" variant="outline" />
+                <UBadge v-else :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
               </td>
               <td class="px-3 py-2 text-muted">
                 {{ dealSummary(brand) ?? '–' }}
@@ -450,6 +490,7 @@ async function save() {
                   >
                   <span class="truncate">{{ brand.name }}</span>
                 </NuxtLink>
+                <BrandStar :starred="brand.starred" :name="brand.name" @toggle="toggleStar(brand)" />
                 <UDropdownMenu :items="moveItems(brand)" :content="{ align: 'end' }">
                   <UButton icon="i-lucide-ellipsis" color="neutral" variant="ghost" size="xs" :aria-label="`Move ${brand.name}`" />
                 </UDropdownMenu>
@@ -481,7 +522,7 @@ async function save() {
       </div>
 
       <p v-if="!filtered.length" class="py-12 text-center text-sm text-muted">
-        {{ brands.length ? 'No brands match.' : 'No brands yet. Create one to start planning shoots.' }}
+        {{ status === 'archived' && view !== 'board' ? 'No archived brands.' : brands.length ? 'No brands match.' : 'No brands yet. Create one to start planning shoots.' }}
       </p>
       <ListPager v-if="view !== 'board'" v-model:page="page" :total="filtered.length" :page-size="pageSize" class="mt-4" />
 

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { DropdownMenuItem } from '@nuxt/ui'
-import type { Json } from '#shared/types/database.types'
-import type { Insert, Row, Update } from '#shared/types/models'
+import type { Row, Update } from '#shared/types/models'
 import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { BundleItem, ShotGroup } from '#shared/utils/shootsheet'
 import type { Beat } from '#shared/utils/slots'
@@ -130,52 +129,26 @@ async function setPeople(next: string[]) {
     }))) return
   }
   await run(async () => {
-    if (added.length) must(await db.from('shoot_people').insert(added.map(person_id => ({ shoot_id: shoot.value.id, person_id }))))
-    // items go with the person (cascade)
-    if (removed.length) must(await db.from('shoot_people').delete().eq('shoot_id', shoot.value.id).in('person_id', removed))
+    await setShootPeople(db, bundle.value, next)
     await refresh()
     // newcomers film the whole shot list, for each of the shoot's channels they're linked to
-    if (await fillMissingItems()) await refresh()
+    if (await fillMissing()) await refresh()
   })
 }
 
 async function setChannels(next: string[]) {
-  const added = next.filter(id => !channelIds.value.includes(id))
-  const removed = channelIds.value.filter(id => !next.includes(id))
   await run(async () => {
-    if (added.length) must(await db.from('shoot_channels').insert(added.map(channel_id => ({ shoot_id: shoot.value.id, channel_id }))))
-    if (removed.length) {
-      must(await db.from('broll_shots').delete().eq('shoot_id', shoot.value.id).in('channel_id', removed))
-      must(await db.from('shoot_items').delete().eq('shoot_id', shoot.value.id).in('channel_id', removed))
-      must(await db.from('shoot_channels').delete().eq('shoot_id', shoot.value.id).in('channel_id', removed))
-    }
+    await setShootChannels(db, bundle.value, next)
     await refresh()
     // everyone linked to a new channel films the shot list for it too
-    if (await fillMissingItems()) await refresh()
+    if (await fillMissing()) await refresh()
   })
 }
 
-/**
- * Make sure everyone on a draft shoot has an item for every shot-list entry on every one of the
- * shoot's channels they're linked to (apart from VOs someone else wrote for themselves). Runs
- * after people or channels change, and when a draft opens, so a channel member added in Settings
- * later is picked up too. The links are read fresh: a person who's just joined isn't in the
- * loaded ones yet. Returns how many items it added.
- */
-async function fillMissingItems(): Promise<number> {
-  if (!isDraft.value || !groups.value.length || !personIds.value.length || !channelIds.value.length) return 0
-  const links = must(await db.from('person_channels').select('person_id, channel_id')
-    .in('person_id', personIds.value).in('channel_id', channelIds.value))
-  const have = new Set(bundle.value.items.map(item => `${item.template_id}|${item.person_id}|${item.channel_id}`))
-  const rows = groups.value.flatMap(group => links
-    .filter(link => performs(group.items[0]!, link.person_id, link.channel_id))
-    .filter(link => !have.has(`${group.template_id}|${link.person_id}|${link.channel_id}`))
-    .map(link => copyFor(group, link.person_id, link.channel_id)))
-  if (rows.length) must(await db.from('shoot_items').insert(rows))
-  return rows.length
-}
+/** Everyone on a draft films every entry on each of their channels (see fillMissingItems). */
+const fillMissing = () => fillMissingItems(db, bundle.value)
 onMounted(async () => {
-  if (await fillMissingItems().catch(() => 0)) await refresh()
+  if (await fillMissing().catch(() => 0)) await refresh()
 })
 
 // --- shot list ---------------------------------------------------------------
@@ -189,87 +162,14 @@ const groupsOf = (kind: string) => groups.value.filter(group => group.kind === k
 const pickerOpen = ref(false)
 const existingTemplates = computed(() => groups.value.map(group => group.template_id))
 
-/** A person's item for one channel, copying a shot-list entry (someone joins, or a channel is added). */
-function copyFor(group: ShotGroup, person_id: string, channel_id: string): Insert<'shoot_items'> {
-  const source = group.items[0]!
-  return {
-    shoot_id: shoot.value.id,
-    person_id,
-    kind: source.kind,
-    hook_template_id: source.kind === 'hook' ? source.template_id : null,
-    body_template_id: source.kind === 'body' ? source.template_id : null,
-    cta_template_id: source.kind === 'cta' ? source.template_id : null,
-    code: group.code,
-    channel_id,
-    cta_mode: source.cta_mode,
-    location: source.location,
-    script_snapshot: source.script_snapshot as Json,
-    caption: source.caption ?? null,
-    sort_order: source.sort_order
-  }
-}
-
 async function addItems(picked: PickedItems) {
   if (!bundle.value.people.length) return
-  // a VO linked to hooks / CTAs only goes with those, so they come onto the shoot with it; and
-  // it's performed by its writer and the people cast on it
-  const cast = new Map<string, string[]>()
-  if (picked.bodies.length) {
-    const ok = await run(async () => {
-      const voIds = picked.bodies.map(body => body.id)
-      for (const member of must(await db.from('vo_cast').select('body_template_id, person_id').in('body_template_id', voIds))) {
-        cast.set(member.body_template_id, [...(cast.get(member.body_template_id) ?? []), member.person_id])
-      }
-      const have = new Set([...existingTemplates.value, ...picked.hooks.map(hook => hook.id), ...picked.ctas.map(cta => cta.id)])
-      const hookIds = must(await db.from('vo_hook_links').select('hook_template_id').in('body_template_id', voIds))
-        .map(link => link.hook_template_id).filter(id => !have.has(id))
-      const ctaIds = must(await db.from('vo_cta_links').select('cta_template_id').in('body_template_id', voIds))
-        .map(link => link.cta_template_id).filter(id => !have.has(id))
-      if (hookIds.length) picked = { ...picked, hooks: [...picked.hooks, ...must(await db.from('hook_templates').select('*').in('id', [...new Set(hookIds)]))] }
-      if (ctaIds.length) picked = { ...picked, ctas: [...picked.ctas, ...must(await db.from('cta_templates').select('*').in('id', [...new Set(ctaIds)]))] }
-    })
-    if (!ok) return
-  }
-  const codes = groups.value.map(group => group.code)
-  let order = Math.max(0, ...bundle.value.items.map(item => item.sort_order))
-  const take = (prefix: string) => {
-    const next = nextItemCodes(codes, prefix, 1)[0]!
-    codes.push(next)
-    return next
-  }
-
-  // one entry per template, then one item per person (only the writer, for their own VOs)
-  // a VO: who performs it on which channel (its writer everywhere, its cast on the cast channel)
-  const entries: (Omit<Insert<'shoot_items'>, 'shoot_id' | 'person_id'> & { performs?: (personId: string, channelId: string) => boolean })[] = []
-  for (const hook of picked.hooks.filter(hook => !existingTemplates.value.includes(hook.id))) entries.push({
-    kind: 'hook',
-    hook_template_id: hook.id,
-    code: take(itemPrefix('hook')),
-    script_snapshot: hook.script,
-    caption: hook.caption,
-    sort_order: ++order
-  })
-  for (const body of picked.bodies.filter(body => !existingTemplates.value.includes(body.id))) {
-    const vo = { kind: 'body' as const, writer_id: body.person_id, cast_ids: cast.get(body.id) ?? [], cast_channel_id: body.cast_channel_id }
-    entries.push({
-      kind: 'body', body_template_id: body.id, code: take('V'), script_snapshot: body.beats, sort_order: ++order,
-      performs: (personId, channelId) => performs(vo, personId, channelId)
-    })
-  }
-  for (const cta of picked.ctas.filter(cta => !existingTemplates.value.includes(cta.id))) {
-    entries.push({ kind: 'cta', cta_template_id: cta.id, code: take('C'), cta_mode: cta.mode, script_snapshot: cta.script, sort_order: ++order })
-  }
-  if (!entries.length) return
-
-  // one item per person per channel they're linked to (a VO: its writer, and its cast on the cast channel)
-  const rows = bundle.value.people.flatMap(person => entries
-    .flatMap(({ performs: performsIt, ...entry }) => channelsFor(bundle.value, person.id)
-      .filter(channel => !performsIt || performsIt(person.id, channel.id))
-      .map(channel => ({ ...entry, shoot_id: shoot.value.id, person_id: person.id, channel_id: channel.id }) as Insert<'shoot_items'>)))
+  let added = 0
   await run(async () => {
-    must(await db.from('shoot_items').insert(rows))
+    added = (await addToShotList(db, bundle.value, picked)).length
     await refresh()
-  }, `Added ${entries.length} item${entries.length === 1 ? '' : 's'} to the structure`)
+  })
+  if (added) toast.add({ title: `Added ${added} item${added === 1 ? '' : 's'} to the structure`, color: 'success', icon: 'i-lucide-circle-check' })
 }
 
 // --- writing a hook here ----------------------------------------------------
@@ -360,31 +260,12 @@ async function removeGroup(group: ShotGroup) {
     danger: true
   }))) return
   await run(async () => {
-    must(await db.from('shoot_items').delete().in('id', group.items.map(item => item.id)))
-    await deleteUnused(group.kind, [group.template_id])
+    await removeFromShotList(db, bundle.value, [group])
     await refresh()
   })
 }
 
-const TEMPLATE_TABLES = {
-  hook: { table: 'hook_templates', column: 'hook_template_id' },
-  body: { table: 'body_templates', column: 'body_template_id' },
-  cta: { table: 'cta_templates', column: 'cta_template_id' }
-} as const
-/**
- * Hooks, VOs and CTAs written in this shoot that no shoot uses any more are deleted with their
- * last line. One written here that another shoot also uses (a VO reused later, or a hook / CTA
- * it's linked to) stays; Library ones are never deleted. Only a VO's writer or an admin can
- * delete it, so for anyone else it stays with the product.
- */
-async function deleteUnused(kind: string, templateIds: string[]) {
-  const target = TEMPLATE_TABLES[kind as keyof typeof TEMPLATE_TABLES]
-  if (!target || !templateIds.length) return
-  const used = new Set(must(await db.from('shoot_items').select(target.column).in(target.column, templateIds))
-    .map(row => (row as Record<string, string | null>)[target.column]))
-  const unused = templateIds.filter(id => !used.has(id))
-  if (unused.length) must(await db.from(target.table).delete().in('id', unused).eq('shoot_id', shoot.value.id))
-}
+const deleteUnused = (kind: string, templateIds: string[]) => deleteUnusedTemplates(db, shoot.value.id, kind, templateIds)
 
 // --- writing VOs here -------------------------------------------------------
 // VOs are only written in a shoot: for its product (one feature, or the product as a whole), by
@@ -399,25 +280,12 @@ async function editVo(group: ShotGroup) {
   })
 }
 async function onVoSaved(vo: Row<'body_templates'>) {
-  const group = groupsOf('body').find(entry => entry.template_id === vo.id)
-  if (!group) {
+  if (!groupsOf('body').some(entry => entry.template_id === vo.id)) {
     await addItems({ hooks: [], bodies: [vo], ctas: [] })
     return
   }
   await run(async () => {
-    must(await db.from('shoot_items').update({ script_snapshot: vo.beats }).in('id', group.items.map(item => item.id)))
-    // its writer performs it on each of their channels, its cast on the cast channel only: lines
-    // for anyone (or anywhere) taken off go, and anyone added gets theirs
-    const cast = must(await db.from('vo_cast').select('person_id').eq('body_template_id', vo.id)).map(member => member.person_id)
-    const plays = { kind: 'body' as const, writer_id: vo.person_id, cast_ids: cast, cast_channel_id: vo.cast_channel_id }
-    const gone = group.items.filter(item => !performs(plays, item.person_id, item.channel_id))
-    if (gone.length) must(await db.from('shoot_items').delete().in('id', gone.map(item => item.id)))
-    const have = new Set(group.items.map(item => `${item.person_id}|${item.channel_id}`))
-    const rows = [vo.person_id, ...cast].filter((id): id is string => !!id && bundle.value.people.some(person => person.id === id))
-      .flatMap(personId => channelsFor(bundle.value, personId)
-        .filter(channel => performs(plays, personId, channel.id) && !have.has(`${personId}|${channel.id}`))
-        .map(channel => ({ ...copyFor(group, personId, channel.id), script_snapshot: vo.beats })))
-    if (rows.length) must(await db.from('shoot_items').insert(rows))
+    await syncVoOnPlan(db, bundle.value, vo)
     await refresh()
   })
 }
@@ -592,29 +460,7 @@ const calculatorOpen = ref(false)
 const treatmentsOpen = ref(false)
 
 // --- status ----------------------------------------------------------------
-const blockers = computed(() => {
-  const list: string[] = []
-  if (!shoot.value.shoot_date) list.push('Set a shoot date')
-  if (!bundle.value.people.length) list.push('Add at least one person')
-  if (!bundle.value.channels.length) list.push('Add at least one channel')
-  // hooks and CTAs only go with modular VOs: a shoot of standalone VOs alone needs neither
-  const modular = groupsOf('body').some(group => !isStandalone(group.items[0]!))
-  if (modular && !groupsOf('hook').length) list.push('Add hooks (Hooks): your modular VOs need them')
-  if (!groupsOf('body').length) list.push('Write VOs (VOs)')
-  if (modular && !groupsOf('cta').length) list.push('Add CTAs (CTAs): your modular VOs need them')
-  const unlinked = bundle.value.people.filter(person => !channelsFor(bundle.value, person.id).length)
-  const unfilmed = bundle.value.channels.filter(channel => !bundle.value.people.some(person => bundle.value.channelPeople?.[channel.id]?.includes(person.id)))
-  if (unfilmed.length) {
-    list.push(`Nobody on this shoot is linked to ${unfilmed.map(channel => channel.name).join(', ')}: add someone who is, or remove ${unfilmed.length === 1 ? 'it' : 'them'} (Settings → People)`)
-  }
-  if (unlinked.length) {
-    list.push(`${unlinked.map(person => person.name).join(', ')} ${unlinked.length === 1 ? 'isn\'t' : 'aren\'t'} linked to any of this shoot's channels (Settings → People)`)
-  }
-  if (unfilled.value.length) {
-    list.push(`Fill or override the unfilled slots in ${unfilled.value.slice(0, 6).map(entry => entry.code).join(', ')}${unfilled.value.length > 6 ? '…' : ''}`)
-  }
-  return list
-})
+const blockers = computed(() => planBlockers(bundle.value))
 
 // --- back to draft -------------------------------------------------------------
 // Only from planned (before the shoot starts): once filming begins, footage may already be
@@ -699,19 +545,8 @@ async function markPlanned() {
   if (blockers.value.length) return
   busy.value = true
   const planned = await run(async () => {
-    // Freeze the filled scripts into the snapshots so later template or product edits can't change this shoot.
-    const frozen = planSnapshots(bundle.value)
-    for (let i = 0; i < frozen.length; i += 20) {
-      const results = await Promise.all(frozen.slice(i, i + 20).map(entry =>
-        db.from('shoot_items').update({
-          script_snapshot: entry.script_snapshot as unknown as Json,
-          script_override: entry.script_override as unknown as Json,
-          caption: entry.caption
-        }).eq('id', entry.id)
-      ))
-      results.forEach(must)
-    }
-    must(await db.from('shoots').update({ status: 'planned' }).eq('id', shoot.value.id))
+    // freezes the filled scripts into the snapshots so later template or product edits can't change this shoot
+    await planShoot(db, bundle.value)
     await refresh()
   }, 'Shoot planned. Exports are ready.')
   busy.value = false

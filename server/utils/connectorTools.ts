@@ -1,11 +1,14 @@
 import type { H3Event } from 'h3'
 import { McpServer } from '@modelcontextprotocol/server'
 import * as z from 'zod/v4'
+import type { Insert, Update } from '#shared/types/models'
+import type { PayAmounts, PayType } from '#shared/utils/brandDeal'
 
 // The AI connector's tools (spec §11). Each request gets a fresh server, acting as the person whose
 // token it is. Every tool works in one organisation: the one it names (`organisation`), from those
 // the person allowed this AI app when connecting it; the database keeps each query inside it.
-// Writes land in the Library tagged `ai-draft` for a person to review. Nothing here deletes, plans or bills.
+// Library writes land tagged `ai-draft` for a person to review. Shoot tools (connectorShootTools) change
+// plans the way the shoot page does. Nothing here bills; archiving a brand hides it (restorable).
 
 const DRAFT_TAG = 'ai-draft'
 
@@ -21,19 +24,25 @@ Write lines the way a real creator talks to camera: first person, plain spoken w
 
 What you add (add_hooks, add_ctas) goes into the Library tagged "${DRAFT_TAG}" for a person to review in Kreate, and the organisation's chat gets a note that you added it.
 
-You can also write VOs on a shoot (add_vo), search the Library (search_library), draft a shoot (draft_shoot) and add brands, products and product features (add_brand, add_product, add_features). VOs and shoots you make are drafts a person reviews in Kreate.
+You can plan shoots end to end like a person in Kreate: change a shoot's setup, people, channels, formats and custom slots (update_shoot), put hooks, VOs and CTAs on its shot list or take them off (add_to_shot_list, remove_from_shot_list), change their wording and locations (edit_shot_list), write and change VOs (add_vo, update_vo), build its b-roll list (add_broll, update_broll, remove_broll) and move it to planned (set_shoot_status, admins). get_shoot shows everything, including what still stops a draft being planned. Ask before removing things or changing status. You can also search the Library (search_library), draft a shoot (draft_shoot) add and change brands (add_brand, update_brand: everything on the brand page, including how it pays us, its star and archiving) and add products and product features (add_product, add_features). VOs and shoots you make are drafts a person reviews in Kreate.
 
 Everything has its own link (the \`link\` field): give it to the person whenever you mention or make something, and use share_to_chat to post an item to the chat as a card.
 
 Each organisation has a chat everyone in it sees (read_chat, post_to_chat). Read it for context when asked; only post when the person asks you to, write as their assistant (your posts are labelled with your app's name), and keep it short.`
 
-const text = (value: unknown) => ({ content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] })
-const failure = (message: string) => ({ content: [{ type: 'text' as const, text: message }], isError: true })
+export const text = (value: unknown) => ({ content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] })
+export const failure = (message: string) => ({ content: [{ type: 'text' as const, text: message }], isError: true })
 
+export type ToolResult = { content: { type: 'text', text: string }[], isError?: boolean }
+export type ConnectorOrg = Org
+export type ConnectorDb = Db
 type Org = { id: string, name: string, slug: string, role: string, entitled: boolean, is_current: boolean }
 type Db = ReturnType<typeof connectorDb>
 
 /** Every tool can name the organisation it's for. */
+const BRAND_STATUS_VALUES = ['prospect', 'auditioning', 'piloting', 'active', 'paused'] as const
+const BRAND_CURRENCIES = ['GBP', 'USD', 'EUR', 'AUD', 'CAD'] as const
+
 const organisationArg = z.string().max(120).optional()
   .describe('Which organisation: its name or slug from list_organisations. Leave out if the person has only one.')
 
@@ -156,17 +165,25 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
 
   server.registerTool('list_brands', {
     title: 'List brands',
-    description: 'The organisation\'s brands and their products, with each product\'s allowed and forbidden claims and its core features. Never make or imply a forbidden claim.',
+    description: 'The organisation\'s brands and their products: each brand\'s status, star, income (how it pays us) and Trybe details, its channels, and each product\'s allowed and forbidden claims and core features. Never make or imply a forbidden claim. Archived brands are left out unless asked for.',
     inputSchema: z.object({
-      status: z.enum(['prospect', 'auditioning', 'piloting', 'active', 'paused']).optional().describe('Only brands at this stage'),
+      status: z.enum(BRAND_STATUS_VALUES).optional().describe('Only brands at this stage'),
+      starred: z.boolean().optional().describe('Only starred brands (the particularly good ones)'),
+      archived: z.boolean().optional().describe('true: only archived brands'),
       organisation: organisationArg
     }),
     annotations: { readOnlyHint: true }
-  }, guarded(async ({ status }: { status?: string, organisation?: string }, _org, db) => {
-    let query = db.from('brands').select('id, name, status, notes, products(id, name, claims_allowed, claims_forbidden, product_features(id, name, description))').order('name')
+  }, guarded(async ({ status, starred, archived }: { status?: string, starred?: boolean, archived?: boolean, organisation?: string }, _org, db) => {
+    let query = db.from('brands')
+      .select('id, name, status, starred, archived_at, notes, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct, currency, trybe_url, trybe_score, brand_channels(channel:channels(name)), products(id, name, claims_allowed, claims_forbidden, product_features(id, name, description))')
+      .order('name')
+    query = archived ? query.not('archived_at', 'is', null) : query.is('archived_at', null)
     if (status) query = query.eq('status', status)
-    return text((must(await query) ?? []).map(brand => ({
+    if (starred) query = query.eq('starred', true)
+    return text((must(await query) ?? []).map(({ brand_channels, pay_types, ...brand }) => ({
       ...brand,
+      income: pay_types,
+      channels: brand_channels.map(row => (row.channel as { name: string } | null)?.name).filter(Boolean),
       link: link(paths.brand(brand.id)),
       products: brand.products.map(product => ({ ...product, link: link(paths.product(brand.id, product.id)) }))
     })))
@@ -213,43 +230,6 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
   }, guarded(async ({ limit }: { limit?: number, organisation?: string }, _org, db) => text((must(await db.from('shoots')
     .select('code, status, shoot_date, product:products(name, brand:brands(name))')
     .order('code', { ascending: false }).limit(limit ?? 30)) ?? []).map(row => ({ ...row, link: link(paths.shoot(row.code)) })))))
-
-  server.registerTool('get_shoot', {
-    title: 'Get shoot',
-    description: 'One shoot\'s plan: its product, channels, formats and every hook, VO and CTA on its shot list, with scripts as they\'ll be filmed.',
-    inputSchema: z.object({ code: z.string().min(2).max(10).describe('The shoot code, e.g. S008'), organisation: organisationArg }),
-    annotations: { readOnlyHint: true }
-  }, guarded(async ({ code }: { code: string, organisation?: string }, _org, db) => {
-    const bundle = await loadShootBundle(db, code.toUpperCase())
-    if (!bundle) return failure(`There's no shoot ${code}.`)
-    const personName = (id: string) => bundle.people.find(person => person.id === id)?.name ?? null
-    return text({
-      code: bundle.shoot.code,
-      link: link(paths.shoot(bundle.shoot.code)),
-      status: bundle.shoot.status,
-      date: bundle.shoot.shoot_date,
-      brand: bundle.brand.name,
-      product: bundle.product.name,
-      claims_allowed: bundle.product.claims_allowed,
-      claims_forbidden: bundle.product.claims_forbidden,
-      custom_slots: bundle.shoot.slot_values,
-      channels: bundle.channels.map(channel => ({ name: channel.name, slot_values: parseSlotValues(channel.slot_values) })),
-      formats: bundle.plannedFormats.map(format => ({ code: format.code, name: format.name, kind: format.kind })),
-      shot_list: groupShotList(bundle.items).map((group) => {
-        const first = group.items[0]!
-        const script = resolveItemScript(bundle, { ...first, script_override: null })
-        return {
-          code: group.code,
-          kind: group.kind === 'body' ? 'vo' : group.kind,
-          about: first.title ?? null,
-          hook_type: first.hook_type,
-          format: first.format?.code ?? null,
-          script: script.beats ? script.beats.map(beat => ({ beat: beat.beat, script: beat.script })) : script.text,
-          people: [...new Set(group.items.map(item => personName(item.person_id)).filter(Boolean))]
-        }
-      })
-    })
-  }))
 
   /** The product, when one's named: it has to be one the person can see. */
   async function productOrError(db: Db, productId: string | undefined) {
@@ -385,10 +365,11 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
       title: z.string().max(120).optional().describe('A short name for it'),
       feature: z.string().max(120).optional().describe('The product feature it\'s about (name), if just one'),
       writer: z.string().max(120).optional().describe('Who performs it (a person on the shoot). Leave out for the person you\'re working for'),
+      on_plan: z.boolean().optional().describe('true: put it straight on the draft shoot\'s shot list (when the person asks); otherwise it waits for them to review'),
       organisation: organisationArg
     }),
     annotations: { readOnlyHint: false, destructiveHint: false }
-  }, guarded(async ({ shoot: code, format: formatCode, beats, title, feature, writer }: { shoot: string, format: string, beats: { beat: string, script: string }[], title?: string, feature?: string, writer?: string, organisation?: string }, org, db) => {
+  }, guarded(async ({ shoot: code, format: formatCode, beats, title, feature, writer, on_plan }: { shoot: string, format: string, beats: { beat: string, script: string }[], title?: string, feature?: string, writer?: string, on_plan?: boolean, organisation?: string }, org, db) => {
     const shoot = must(await db.from('shoots').select('id, code, status, product_id').eq('code', code.trim().toUpperCase()).maybeSingle())
     if (!shoot) return failure(`There's no shoot ${code}. Use a code from list_shoots.`)
     const format = must(await db.from('formats').select('id, code, beats').eq('code', formatCode.trim().toUpperCase()).eq('archived', false).maybeSingle())
@@ -434,15 +415,23 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
       beats: ordered,
       tags: [DRAFT_TAG],
       est_seconds: estimateSeconds(ordered.map(entry => entry.script).join(' '), wps)
-    }).select('id').single())
+    }).select('*').single())!
+    let planCode: string | null = null
+    if (on_plan) {
+      if (shoot.status !== 'draft') return failure(`${shoot.code} isn't a draft, so its shot list can't change. The VO is saved: ${link(paths.vo(shoot.code, vo.id))}`)
+      if (!person) return failure(`It needs a writer to go on the shot list. The VO is saved: ${link(paths.vo(shoot.code, vo.id))}`)
+      const bundle = await loadShootBundle(db, shoot.code)
+      planCode = (await addToShotList(db, bundle!, { hooks: [], bodies: [vo], ctas: [] }))[0]?.code ?? null
+    }
     return text({
       added: 'VO',
       organisation: org.name,
       shoot: shoot.code,
       format: format.code,
       writer: person?.name ?? 'nobody yet: pick one when reviewing',
-      link: link(paths.vo(shoot.code, vo!.id)),
-      review: 'It\'s a draft: open the link to review it and save it onto the shoot\'s plan.'
+      code: planCode,
+      link: link(paths.vo(shoot.code, vo.id)),
+      review: planCode ? `It's on the shot list as ${planCode}.` : 'It\'s a draft: open the link to review it and save it onto the shoot\'s plan (or update_vo with on_plan).'
     })
   }))
 
@@ -488,6 +477,8 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
     })
   }))
 
+  registerShootTools({ server, guarded, text, failure, link, paths, pace, organisationArg })
+
   // --- brands, products, features ------------------------------------------------------------------
   /** a slug that isn't taken yet in this table (name, name-2, name-3…) */
   async function freeSlug(db: Db, table: 'brands' | 'products', name: string, brandId?: string) {
@@ -502,28 +493,116 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
     return `${base}-${n}`
   }
 
+  /** Brand inputs shared by add_brand and update_brand: everything the brand page can set. */
+  const brandInputs = {
+    status: z.enum(BRAND_STATUS_VALUES).optional().describe('Its stage: prospect, auditioning, piloting, active or paused'),
+    notes: z.string().max(4000).nullable().optional().describe('What the brand is, who it\'s for, anything worth knowing (null clears)'),
+    income: z.array(z.enum(PAY_TYPE_VALUES)).max(4).optional()
+      .describe('Every way the brand pays us, replacing what\'s set: flat (a fee per approved video), retainer (per month), commission (% of sales), ad_spend (% of what it spends running our videos). [] means not agreed yet.'),
+    flat_fee: z.number().min(0).max(10_000_000).nullable().optional().describe('Flat fee per approved video, in the currency. Giving it adds flat to income.'),
+    retainer_fee: z.number().min(0).max(10_000_000).nullable().optional().describe('Retainer per month, in the currency. Giving it adds retainer to income.'),
+    commission_pct: z.number().min(0).max(100).nullable().optional().describe('Commission on sales, %. Giving it adds commission to income.'),
+    ad_spend_pct: z.number().min(0).max(100).nullable().optional().describe('Share of ad spend, %. Giving it adds ad_spend to income.'),
+    currency: z.enum(BRAND_CURRENCIES).optional().describe('Currency of the amounts (default GBP)'),
+    trybe_url: z.string().url().max(500).nullable().optional().describe('Its Trybe page'),
+    trybe_score: z.number().min(0).max(1000).nullable().optional().describe('Its score on Trybe'),
+    starred: z.boolean().optional().describe('Star it as a particularly good brand'),
+    channels: z.array(z.string().max(120)).max(50).optional().describe('The channels (by name, from list_brands) its new shoots go on, replacing the current ones. New brands start with every channel.')
+  }
+  type BrandInput = {
+    status?: string, notes?: string | null, income?: PayType[], flat_fee?: number | null, retainer_fee?: number | null,
+    commission_pct?: number | null, ad_spend_pct?: number | null, currency?: string, trybe_url?: string | null,
+    trybe_score?: number | null, starred?: boolean, channels?: string[], organisation?: string
+  }
+
+  /** Columns to write from brand inputs; income merges onto what the brand already has. */
+  function brandColumns(input: BrandInput, current: PayAmounts & { pay_types: string[] }) {
+    const columns: Record<string, unknown> = {}
+    if (input.status !== undefined) columns.status = input.status
+    if (input.notes !== undefined) columns.notes = input.notes?.trim() || null
+    if (input.currency !== undefined) columns.currency = input.currency
+    if (input.trybe_url !== undefined) columns.trybe_url = input.trybe_url
+    if (input.trybe_score !== undefined) columns.trybe_score = input.trybe_score
+    if (input.starred !== undefined) columns.starred = input.starred
+    const incomeTouched = input.income !== undefined
+      || [input.flat_fee, input.retainer_fee, input.commission_pct, input.ad_spend_pct].some(value => value !== undefined)
+    if (incomeTouched) {
+      Object.assign(columns, mergeIncome(current, {
+        types: input.income, flat_fee: input.flat_fee, retainer_fee: input.retainer_fee, commission_pct: input.commission_pct, ad_spend_pct: input.ad_spend_pct
+      }))
+    }
+    return columns
+  }
+
+  /** Set a brand's channels by name; names that aren't channels are reported back. */
+  async function setBrandChannels(db: Db, brandId: string, names: string[]) {
+    const all = must(await db.from('channels').select('id, name')) ?? []
+    const wanted = new Set(names.map(name => name.trim().toLowerCase()))
+    const found = all.filter(channel => wanted.has(channel.name.toLowerCase()))
+    const unknown = names.filter(name => !all.some(channel => channel.name.toLowerCase() === name.trim().toLowerCase()))
+    must(await db.from('brand_channels').delete().eq('brand_id', brandId))
+    if (found.length) must(await db.from('brand_channels').insert(found.map(channel => ({ brand_id: brandId, channel_id: channel.id }))))
+    return { channels: found.map(channel => channel.name), unknown_channels: unknown.length ? unknown : undefined }
+  }
+
+  async function brandSummary(db: Db, id: string) {
+    const row = must(await db.from('brands')
+      .select('id, name, status, starred, archived_at, notes, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct, currency, trybe_url, trybe_score')
+      .eq('id', id).single())!
+    const { pay_types, ...rest } = row
+    return { ...rest, income: pay_types, link: link(paths.brand(id)) }
+  }
+
   server.registerTool('add_brand', {
     title: 'Add brand',
-    description: 'Add a brand (a prospect unless told otherwise), with notes. Check list_brands first so it isn\'t a duplicate. Add its products with add_product.',
+    description: 'Add a brand (a prospect unless told otherwise) with any of its details: notes, income (how it pays us, with amounts), currency, Trybe page and score, star and channels. Check list_brands first so it isn\'t a duplicate. Add its products with add_product.',
     inputSchema: z.object({
       name: z.string().min(1).max(120),
-      status: z.enum(['prospect', 'auditioning', 'piloting', 'active', 'paused']).optional().describe('Default prospect'),
-      notes: z.string().max(4000).optional().describe('What the brand is, who it\'s for, anything worth knowing'),
-      trybe_url: z.string().url().max(500).optional().describe('Its Trybe page, if known'),
+      ...brandInputs,
       organisation: organisationArg
     }),
     annotations: { readOnlyHint: false, destructiveHint: false }
-  }, guarded(async ({ name, status, notes, trybe_url }: { name: string, status?: string, notes?: string, trybe_url?: string, organisation?: string }, org, db) => {
-    const existing = must(await db.from('brands').select('id, name').ilike('name', name.trim()).maybeSingle())
-    if (existing) return failure(`${existing.name} is already here: ${link(paths.brand(existing.id))}`)
+  }, guarded(async (input: BrandInput & { name: string }, org, db) => {
+    const existing = must(await db.from('brands').select('id, name, archived_at').ilike('name', input.name.trim()).maybeSingle())
+    if (existing) return failure(`${existing.name} is already here${existing.archived_at ? ' (archived: restore it with update_brand)' : ''}: ${link(paths.brand(existing.id))}`)
     const brand = must(await db.from('brands').insert({
-      name: name.trim(),
-      slug: await freeSlug(db, 'brands', name),
-      status: status ?? 'prospect',
-      notes: notes?.trim() || null,
-      trybe_url: trybe_url ?? null
-    }).select('id, name, status').single())!
-    return text({ added: 'brand', organisation: org.name, ...brand, link: link(paths.brand(brand.id)) })
+      ...brandColumns(input, { pay_types: [] }),
+      name: input.name.trim(),
+      slug: await freeSlug(db, 'brands', input.name),
+      status: input.status ?? 'prospect'
+    } as Insert<'brands'>).select('id').single())!
+    const channels = input.channels ? await setBrandChannels(db, brand.id, input.channels) : {}
+    return text({ added: 'brand', organisation: org.name, ...await brandSummary(db, brand.id), ...channels })
+  }))
+
+  server.registerTool('update_brand', {
+    title: 'Update brand',
+    description: 'Change a brand: its name, status, notes, income (how it pays us, with amounts), currency, Trybe page and score, star, channels, or archive or restore it. Only what you pass changes. Archiving hides the brand and its products from new work; its shoots stay. Confirm with the person before archiving.',
+    inputSchema: z.object({
+      brand_id: z.string().uuid().describe('The brand (from list_brands)'),
+      name: z.string().min(1).max(120).optional(),
+      ...brandInputs,
+      archived: z.boolean().optional().describe('true archives the brand, false restores it'),
+      organisation: organisationArg
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false }
+  }, guarded(async (input: BrandInput & { brand_id: string, name?: string, archived?: boolean }, org, db) => {
+    const current = must(await db.from('brands')
+      .select('id, name, archived_at, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct')
+      .eq('id', input.brand_id).maybeSingle())
+    if (!current) return failure('That brand isn\'t in this organisation. Use an id from list_brands.')
+    const columns = brandColumns(input, current)
+    if (input.name?.trim()) columns.name = input.name.trim()
+    if (input.archived !== undefined) columns.archived_at = input.archived ? (current.archived_at ?? new Date().toISOString()) : null
+    if (Object.keys(columns).length) must(await db.from('brands').update(columns as Update<'brands'>).eq('id', current.id))
+    const channels = input.channels ? await setBrandChannels(db, current.id, input.channels) : {}
+    return text({
+      updated: 'brand',
+      organisation: org.name,
+      changed: [...Object.keys(columns), ...(input.channels ? ['channels'] : [])],
+      ...await brandSummary(db, current.id),
+      ...channels
+    })
   }))
 
   server.registerTool('add_product', {
@@ -540,8 +619,9 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
     }),
     annotations: { readOnlyHint: false, destructiveHint: false }
   }, guarded(async ({ brand_id, name, claims_allowed, claims_forbidden, notes, features }: { brand_id: string, name: string, claims_allowed?: string, claims_forbidden?: string, notes?: string, features?: { name: string, description?: string }[], organisation?: string }, org, db) => {
-    const brand = must(await db.from('brands').select('id, name').eq('id', brand_id).maybeSingle())
+    const brand = must(await db.from('brands').select('id, name, archived_at').eq('id', brand_id).maybeSingle())
     if (!brand) return failure('That brand isn\'t in this organisation. Use an id from list_brands.')
+    if (brand.archived_at) return failure(`${brand.name} is archived. Restore it first (update_brand with archived: false) if the person wants it back.`)
     const existing = must(await db.from('products').select('id, name').eq('brand_id', brand.id).ilike('name', name.trim()).maybeSingle())
     if (existing) return failure(`${brand.name} already has ${existing.name}: ${link(paths.product(brand.id, existing.id))}`)
     const product = must(await db.from('products').insert({

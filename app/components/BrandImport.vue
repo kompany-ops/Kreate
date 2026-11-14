@@ -88,8 +88,7 @@ async function runImport() {
   importing.value = false
 }
 
-const payLabel = (brand: { pay_model: string | null, flat_fee: number | null, commission_pct: number | null, currency: string }) =>
-  dealSummary(brand) ?? '—'
+const payLabel = (brand: Parameters<typeof dealSummary>[0]) => dealSummary(brand) ?? '—'
 </script>
 
 <template>

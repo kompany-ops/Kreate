@@ -314,6 +314,8 @@ export type Database = {
       }
       brands: {
         Row: {
+          ad_spend_pct: number | null
+          archived_at: string | null
           commission_pct: number | null
           created_at: string
           created_by: string | null
@@ -323,8 +325,10 @@ export type Database = {
           name: string
           notes: string | null
           org_id: string
-          pay_model: string | null
+          pay_types: string[]
+          retainer_fee: number | null
           slug: string
+          starred: boolean
           status: string
           trybe_brand_id: string | null
           trybe_data: Json | null
@@ -334,6 +338,8 @@ export type Database = {
           videos_required: number | null
         }
         Insert: {
+          ad_spend_pct?: number | null
+          archived_at?: string | null
           commission_pct?: number | null
           created_at?: string
           created_by?: string | null
@@ -343,8 +349,10 @@ export type Database = {
           name: string
           notes?: string | null
           org_id?: string
-          pay_model?: string | null
+          pay_types?: string[]
+          retainer_fee?: number | null
           slug: string
+          starred?: boolean
           status?: string
           trybe_brand_id?: string | null
           trybe_data?: Json | null
@@ -354,6 +362,8 @@ export type Database = {
           videos_required?: number | null
         }
         Update: {
+          ad_spend_pct?: number | null
+          archived_at?: string | null
           commission_pct?: number | null
           created_at?: string
           created_by?: string | null
@@ -363,8 +373,10 @@ export type Database = {
           name?: string
           notes?: string | null
           org_id?: string
-          pay_model?: string | null
+          pay_types?: string[]
+          retainer_fee?: number | null
           slug?: string
+          starred?: boolean
           status?: string
           trybe_brand_id?: string | null
           trybe_data?: Json | null

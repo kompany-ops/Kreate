@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createFields, parseCsv, parseScrybeCsv, payModel, planImport, updateFields } from '../shared/utils/brandImport'
+import { createFields, parseCsv, parseScrybeCsv, payTypes, planImport, updateFields } from '../shared/utils/brandImport'
 
 const HEADER = 'name,trybe link,trybe brand id,matched,match notes,pay types,commission %,ad spend %,flat per video $,flat per order $,retainer $,cap $,pay terms,trybe score,rating,reviews,creator earnings,total creators,categories,new,samples,top products,about,logo,scanned on'
 
@@ -31,9 +31,10 @@ describe('parseScrybeCsv', () => {
       name: 'Split Pay',
       trybe_url: null,
       trybe_brand_id: '449ca726-4aba-4463-a167-88a184fcf811',
-      pay_model: 'both',
+      pay_types: ['flat', 'commission', 'ad_spend'],
       flat_fee: 15,
       commission_pct: 10,
+      ad_spend_pct: 7,
       currency: 'USD',
       trybe_score: 68
     })
@@ -58,7 +59,7 @@ describe('parseScrybeCsv', () => {
 
   it('treats empty cells as unknown, never zero', () => {
     const { brands } = parseScrybeCsv(file('Not Scanned Yet,,,unknown,trybe score,,,,,,,,,,,,,,,,,,,,'))
-    expect(brands[0]).toMatchObject({ pay_model: null, flat_fee: null, commission_pct: null, trybe_score: null })
+    expect(brands[0]).toMatchObject({ pay_types: [], flat_fee: null, commission_pct: null, trybe_score: null })
     expect(brands[0]!.trybe_data).toMatchObject({ matched: 'unknown', cap: null, scanned_on: null })
   })
 
@@ -98,7 +99,7 @@ describe('parseScrybeCsv', () => {
       name: 'King Lou Pets',
       trybe_url: null,
       trybe_brand_id: '4a76e9e3-9dad-4303-9888-e88e66704e8b',
-      pay_model: 'commission',
+      pay_types: ['commission'],
       commission_pct: 15,
       trybe_score: 35
     })
@@ -111,7 +112,7 @@ describe('parseScrybeCsv', () => {
       cap: null
     })
 
-    expect(brands[1]).toMatchObject({ pay_model: 'both', flat_fee: 5000, commission_pct: null })
+    expect(brands[1]).toMatchObject({ pay_types: ['flat', 'ad_spend'], flat_fee: 5000, commission_pct: null, ad_spend_pct: 5 })
     expect(brands[1]!.trybe_data).toMatchObject({
       pay_types: ['% of ad spend', 'Flat per video'],
       ad_spend_pct: 5,
@@ -120,7 +121,7 @@ describe('parseScrybeCsv', () => {
       new: true
     })
 
-    expect(brands[2]).toMatchObject({ pay_model: 'flat', flat_fee: null })
+    expect(brands[2]).toMatchObject({ pay_types: ['flat'], flat_fee: null })
     expect(brands[2]!.trybe_data.flat_per_order).toBe(10)
   })
 
@@ -133,7 +134,7 @@ describe('parseScrybeCsv', () => {
     const { brands, errors } = parseScrybeCsv(csv)
     expect(brands).toHaveLength(2)
     expect(errors).toEqual(['Kept as extra Trybe data on each brand: TikTok Shop.'])
-    expect(brands[0]).toMatchObject({ name: 'Future Co', commission_pct: 12.5, pay_model: 'both' })
+    expect(brands[0]).toMatchObject({ name: 'Future Co', commission_pct: 12.5, pay_types: ['retainer', 'commission', 'ad_spend'], ad_spend_pct: null })
     expect(brands[0]!.trybe_data).toMatchObject({
       ad_spend_pct: 1000,
       cap: 2500,
@@ -152,15 +153,16 @@ describe('parseScrybeCsv', () => {
   })
 })
 
-describe('payModel', () => {
+describe('payTypes', () => {
   const none = { pay_types: [], commission_pct: null, ad_spend_pct: null, flat_per_video: null, flat_per_order: null, retainer: null }
-  it('maps Scrybe pay figures to flat / commission / both', () => {
-    expect(payModel({ ...none, flat_per_video: 15 })).toBe('flat')
-    expect(payModel({ ...none, retainer: 500 })).toBe('flat')
-    expect(payModel({ ...none, ad_spend_pct: 7 })).toBe('commission')
-    expect(payModel({ ...none, commission_pct: 10, flat_per_order: 2 })).toBe('both')
-    expect(payModel({ ...none, pay_types: ['% of GMV/sales'] })).toBe('commission')
-    expect(payModel(none)).toBeNull()
+  it('maps Scrybe pay figures and labels to flat fee, retainer, commission and ad spend', () => {
+    expect(payTypes({ ...none, flat_per_video: 15 })).toEqual(['flat'])
+    expect(payTypes({ ...none, retainer: 500 })).toEqual(['retainer'])
+    expect(payTypes({ ...none, ad_spend_pct: 7 })).toEqual(['ad_spend'])
+    expect(payTypes({ ...none, commission_pct: 10, flat_per_order: 2 })).toEqual(['flat', 'commission'])
+    expect(payTypes({ ...none, pay_types: ['% of GMV/sales'] })).toEqual(['commission'])
+    expect(payTypes({ ...none, pay_types: ['% of ad spend', 'Retainer'] })).toEqual(['retainer', 'ad_spend'])
+    expect(payTypes(none)).toEqual([])
   })
 })
 
@@ -190,7 +192,7 @@ describe('planImport', () => {
     const pawco = plan.updates.find(update => update.id === 'b1')!
     const fields = updateFields(pawco.brand)
     expect(fields).toMatchObject({ trybe_url: 'https://trybe.example/creator/discover?brand=abc', trybe_brand_id: 'abc', trybe_score: 90 })
-    expect(fields).not.toHaveProperty('pay_model')
+    expect(fields).not.toHaveProperty('pay_types')
     expect(fields).not.toHaveProperty('name')
     expect(fields).not.toHaveProperty('status')
   })

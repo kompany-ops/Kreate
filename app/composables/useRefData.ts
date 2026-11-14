@@ -39,8 +39,9 @@ export const useRefData = () => {
   const hookTypeOptions = computed(() =>
     hookTypes.value.filter(type => !type.archived).map(type => ({ label: type.name, value: type.id }))
   )
+  /** products to pick from: an archived brand's products are left out (productOf still finds them) */
   const productOptions = computed(() =>
-    products.value.map(product => ({ label: `${product.brand.name} — ${product.name}`, value: product.id }))
+    products.value.filter(product => !product.brand.archived_at).map(product => ({ label: `${product.brand.name} — ${product.name}`, value: product.id }))
   )
   /** A product's core features, in order, as select options. */
   const featureOptions = (productId: string | null | undefined) =>

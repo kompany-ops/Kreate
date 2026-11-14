@@ -3,6 +3,7 @@
 // columns we don't recognise are kept on the brand as extra Trybe data rather than dropped.
 // Pure: parsing and planning are unit-tested; the Brands page does the writes.
 import { slugify } from './slots'
+import { PAY_TYPE_VALUES, type PayType } from './brandDeal'
 
 /** Everything Scrybe exports that has no dedicated brand column. Stored as brands.trybe_data. */
 export interface TrybeData {
@@ -38,11 +39,15 @@ export interface ImportedBrand {
   name: string
   trybe_url: string | null
   trybe_brand_id: string | null
-  pay_model: 'flat' | 'commission' | 'both' | null
+  pay_types: PayType[]
   /** flat fee per video, in dollars */
   flat_fee: number | null
+  /** retainer per month, in dollars */
+  retainer_fee: number | null
   /** % of GMV/sales */
   commission_pct: number | null
+  /** % of ad spend */
+  ad_spend_pct: number | null
   currency: 'USD'
   trybe_score: number | null
   trybe_data: TrybeData
@@ -318,9 +323,11 @@ export function parseScrybeCsv(csv: string): ParsedImport {
       name,
       trybe_url: url(get('trybeLink')),
       trybe_brand_id: trybeBrandId,
-      pay_model: payModel(data),
+      pay_types: payTypes(data),
       flat_fee: data.flat_per_video,
-      commission_pct: data.commission_pct,
+      retainer_fee: data.retainer,
+      commission_pct: percent(data.commission_pct),
+      ad_spend_pct: percent(data.ad_spend_pct),
       currency: 'USD',
       trybe_score: number(get('trybeScore')),
       trybe_data: data
@@ -331,20 +338,23 @@ export function parseScrybeCsv(csv: string): ParsedImport {
   return { brands, errors }
 }
 
+/** A percentage the brand columns can hold (0–100); anything else stays in trybe_data only. */
+const percent = (value: number | null) => value !== null && value >= 0 && value <= 100 ? value : null
+
 /**
- * Our pay model from Scrybe's pay figures: any flat amount (per video, per order, retainer)
- * counts as flat; a commission or ad-spend percentage counts as commission.
+ * Our income types from Scrybe's pay figures and labels: a flat amount per video or per order
+ * is a flat fee, a retainer is a retainer, a % of sales/GMV is commission, a % of ad spend is
+ * ad spend. A bare "%" label with no figure counts as commission.
  */
-export function payModel(data: Pick<TrybeData, 'pay_types' | 'commission_pct' | 'ad_spend_pct' | 'flat_per_video' | 'flat_per_order' | 'retainer'>): ImportedBrand['pay_model'] {
-  const types = data.pay_types.map(type => type.toLowerCase())
-  const flat = data.flat_per_video !== null || data.flat_per_order !== null || data.retainer !== null
-    || types.some(type => type.startsWith('flat') || type === 'retainer')
-  const commission = data.commission_pct !== null || data.ad_spend_pct !== null
-    || types.some(type => type.startsWith('%'))
-  if (flat && commission) return 'both'
-  if (flat) return 'flat'
-  if (commission) return 'commission'
-  return null
+export function payTypes(data: Pick<TrybeData, 'pay_types' | 'commission_pct' | 'ad_spend_pct' | 'flat_per_video' | 'flat_per_order' | 'retainer'>): PayType[] {
+  const labels = data.pay_types.map(type => type.toLowerCase())
+  const found = new Set<PayType>()
+  if (data.flat_per_video !== null || data.flat_per_order !== null || labels.some(type => type.startsWith('flat'))) found.add('flat')
+  if (data.retainer !== null || labels.some(type => type.startsWith('retainer'))) found.add('retainer')
+  const adSpendLabel = labels.some(type => type.startsWith('%') && /ad/.test(type))
+  if (data.ad_spend_pct !== null || adSpendLabel) found.add('ad_spend')
+  if (data.commission_pct !== null || labels.some(type => type.startsWith('%') && !/ad/.test(type))) found.add('commission')
+  return PAY_TYPE_VALUES.filter(type => found.has(type))
 }
 
 // --- plan ------------------------------------------------------------------
@@ -394,9 +404,11 @@ export function createFields(brand: ImportedBrand & { slug: string }) {
     status: 'prospect',
     trybe_url: brand.trybe_url,
     trybe_brand_id: brand.trybe_brand_id,
-    pay_model: brand.pay_model,
+    pay_types: brand.pay_types,
     flat_fee: brand.flat_fee,
+    retainer_fee: brand.retainer_fee,
     commission_pct: brand.commission_pct,
+    ad_spend_pct: brand.ad_spend_pct,
     currency: brand.currency,
     trybe_score: brand.trybe_score,
     trybe_data: brand.trybe_data
@@ -409,11 +421,13 @@ export function updateFields(brand: ImportedBrand) {
   if (brand.trybe_url) fields.trybe_url = brand.trybe_url
   if (brand.trybe_brand_id) fields.trybe_brand_id = brand.trybe_brand_id
   if (brand.trybe_score !== null) fields.trybe_score = brand.trybe_score
-  if (brand.pay_model) {
-    fields.pay_model = brand.pay_model
+  if (brand.pay_types.length) {
+    fields.pay_types = brand.pay_types
     fields.currency = brand.currency
     fields.flat_fee = brand.flat_fee
+    fields.retainer_fee = brand.retainer_fee
     fields.commission_pct = brand.commission_pct
+    fields.ad_spend_pct = brand.ad_spend_pct
   }
   return fields
 }

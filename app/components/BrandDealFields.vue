@@ -1,9 +1,12 @@
 <script setup lang="ts">
-// Trybe deal terms for a brand: how it pays (flat fee, commission or both) and its Trybe numbers.
+// Trybe deal terms for a brand: how it pays (any mix of flat fee, retainer, commission and ad
+// spend, each with its amount) and its Trybe numbers.
 export interface BrandDeal {
-  pay_model: string | undefined
+  pay_types: string[]
   flat_fee: number | undefined
+  retainer_fee: number | undefined
   commission_pct: number | undefined
+  ad_spend_pct: number | undefined
   currency: string
   trybe_score: number | undefined
   trybe_url: string
@@ -11,32 +14,47 @@ export interface BrandDeal {
 
 const deal = defineModel<BrandDeal>({ required: true })
 
-const showFlat = computed(() => deal.value.pay_model === 'flat' || deal.value.pay_model === 'both')
-const showCommission = computed(() => deal.value.pay_model === 'commission' || deal.value.pay_model === 'both')
+const chosen = computed(() => PAY_TYPES.filter(type => deal.value.pay_types.includes(type.value)))
+
+function toggle(type: string, on: boolean | 'indeterminate') {
+  const rest = deal.value.pay_types.filter(value => value !== type)
+  deal.value.pay_types = on === true ? [...rest, type] : rest
+}
 </script>
 
 <template>
   <div class="space-y-4">
+    <UFormField label="Income" help="Tick every way the brand pays. Nothing ticked means not agreed yet.">
+      <div class="grid grid-cols-2 gap-2 pt-1">
+        <UCheckbox
+          v-for="type in PAY_TYPES"
+          :key="type.value"
+          :model-value="deal.pay_types.includes(type.value)"
+          :label="type.label"
+          @update:model-value="toggle(type.value, $event)"
+        />
+      </div>
+    </UFormField>
     <div class="grid gap-4 sm:grid-cols-2">
-      <UFormField label="Pay model">
-        <USelect v-model="deal.pay_model" :items="PAY_MODELS" placeholder="Not agreed yet" class="w-full" />
-      </UFormField>
-      <UFormField label="Currency">
-        <USelect v-model="deal.currency" :items="CURRENCIES" class="w-full" />
-      </UFormField>
-      <UFormField v-if="showFlat" label="Flat fee" help="Per approved video">
-        <UInput v-model.number="deal.flat_fee" type="number" min="0" step="0.01" class="w-full">
-          <template #leading>
+      <UFormField v-for="type in chosen" :key="type.value" :label="type.label" :help="type.help">
+        <UInput
+          v-model.number="deal[type.field]"
+          type="number"
+          min="0"
+          :max="type.unit === 'pct' ? 100 : undefined"
+          :step="type.unit === 'pct' ? 0.5 : 0.01"
+          class="w-full"
+        >
+          <template v-if="type.unit === 'money'" #leading>
             <span class="text-xs text-muted">{{ currencySymbol(deal.currency) }}</span>
           </template>
-        </UInput>
-      </UFormField>
-      <UFormField v-if="showCommission" label="Commission" help="On sales">
-        <UInput v-model.number="deal.commission_pct" type="number" min="0" max="100" step="0.5" class="w-full">
-          <template #trailing>
+          <template v-else #trailing>
             <span class="text-xs text-muted">%</span>
           </template>
         </UInput>
+      </UFormField>
+      <UFormField label="Currency">
+        <USelect v-model="deal.currency" :items="CURRENCIES" class="w-full" />
       </UFormField>
       <UFormField label="Trybe score">
         <UInput v-model.number="deal.trybe_score" type="number" min="0" step="0.1" class="w-full" />

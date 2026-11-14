@@ -52,6 +52,31 @@ async function saveBrand() {
   saving.value = false
 }
 
+// --- star and archive ------------------------------------------------------
+const { confirmDialog } = useConfirm()
+
+async function toggleStar() {
+  const starred = !brand.value!.starred
+  await run(async () => {
+    must(await db.from('brands').update({ starred }).eq('id', brandId))
+    brand.value = { ...brand.value!, starred }
+  })
+}
+
+/** Archive hides the brand everywhere (its products leave the pickers); its shoots and Library stay. */
+async function setArchived(archive: boolean) {
+  if (archive && !(await confirmDialog({
+    title: `Archive ${brand.value!.name}?`,
+    description: 'It leaves the Brands list and its products leave the pickers for new shoots, hooks and CTAs. Its shoots and everything filmed stay. You can restore it from Brands → Archived.',
+    confirmLabel: 'Archive brand',
+    danger: true
+  }))) return
+  await run(async () => {
+    must(await db.from('brands').update({ archived_at: archive ? new Date().toISOString() : null }).eq('id', brandId))
+    await Promise.all([loadBrand(), load(true)])
+  }, archive ? 'Brand archived' : 'Brand restored')
+}
+
 async function toggleChannel(channelId: string, on: boolean) {
   await run(async () => {
     if (on) must(await db.from('brand_channels').insert({ brand_id: brandId, channel_id: channelId }))
@@ -168,15 +193,45 @@ async function saveProduct() {
           <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/brands" aria-label="Back to brands" />
         </template>
         <template #trailing>
-          <UBadge :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
+          <BrandStar :starred="brand.starred" :name="brand.name" size="sm" @toggle="toggleStar" />
+          <UBadge v-if="brand.archived_at" label="Archived" color="neutral" variant="outline" />
+          <UBadge v-else :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
         </template>
         <template #right>
+          <UButton
+            v-if="brand.archived_at"
+            icon="i-lucide-archive-restore"
+            label="Restore"
+            color="neutral"
+            variant="subtle"
+            @click="setArchived(false)"
+          />
+          <UButton
+            v-else
+            icon="i-lucide-archive"
+            label="Archive"
+            color="neutral"
+            variant="ghost"
+            :ui="ICON_ON_MOBILE"
+            class="max-sm:px-1.5"
+            aria-label="Archive brand"
+            @click="setArchived(true)"
+          />
           <ShareToChat :share="{ type: 'brand', id: brand.id, title: brand.name, preview: brand.notes || undefined, path: `/brands/${brand.id}` }" />
         </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
+      <UAlert
+        v-if="brand.archived_at"
+        icon="i-lucide-archive"
+        color="neutral"
+        variant="subtle"
+        title="This brand is archived"
+        :description="`Archived ${formatDate(brand.archived_at.slice(0, 10))}. It's hidden from Brands and its products from the pickers. Restore it to use it again.`"
+        class="mx-auto mb-6 w-full max-w-5xl"
+      />
       <div class="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-2">
         <UCard>
           <template #header>

@@ -1,4 +1,6 @@
-type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
+import type { PayType } from '#shared/utils/brandDeal'
+
+type Color ='primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
 
 export const BRAND_STATUSES = ['prospect', 'auditioning', 'piloting', 'active', 'paused'] as const
 
@@ -9,12 +11,6 @@ export const BRAND_STATUS_COLORS: Record<string, Color> = {
   active: 'success',
   paused: 'warning'
 }
-
-export const PAY_MODELS = [
-  { label: 'Flat fee', value: 'flat' },
-  { label: 'Commission', value: 'commission' },
-  { label: 'Flat fee + commission', value: 'both' }
-]
 
 export const CURRENCIES = ['GBP', 'USD', 'EUR', 'AUD', 'CAD'].map(code => ({ label: code, value: code }))
 
@@ -31,46 +27,54 @@ export function formatMoney(amount: number, currency: string): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount)
 }
 
-/** "£150 / video + 10% commission", or null when no terms are set. */
-export function dealSummary(brand: {
-  pay_model: string | null
+type DealRow = {
+  pay_types: string[]
   flat_fee: number | null
+  retainer_fee: number | null
   commission_pct: number | null
+  ad_spend_pct: number | null
   currency: string
-}): string | null {
-  const parts: string[] = []
-  if (brand.pay_model !== 'commission' && brand.flat_fee !== null) parts.push(`${formatMoney(Number(brand.flat_fee), brand.currency)} / video`)
-  if (brand.pay_model !== 'flat' && brand.commission_pct !== null) parts.push(`${Number(brand.commission_pct)}% commission`)
-  if (parts.length) return parts.join(' + ')
-  return PAY_MODELS.find(model => model.value === brand.pay_model)?.label ?? null
+}
+
+/** "£150 / video + £2,000 / month + 10% commission + 8% of ad spend", or null when no terms are set. */
+export function dealSummary(brand: DealRow): string | null {
+  const money = (amount: number | null, per: string) => amount === null ? null : `${formatMoney(Number(amount), brand.currency)} / ${per}`
+  const pct = (amount: number | null, of: string) => amount === null ? null : `${Number(amount)}% ${of}`
+  const amounts: Record<PayType, string | null> = {
+    flat: money(brand.flat_fee, 'video'),
+    retainer: money(brand.retainer_fee, 'month'),
+    commission: pct(brand.commission_pct, 'commission'),
+    ad_spend: pct(brand.ad_spend_pct, 'of ad spend')
+  }
+  const parts = PAY_TYPES.filter(type => brand.pay_types.includes(type.value))
+    .map(type => amounts[type.value] ?? type.label)
+  return parts.length ? parts.join(' + ') : null
 }
 
 /** Form state for BrandDealFields from a brand row (or blank for a new brand). */
-export function toBrandDeal(brand?: {
-  pay_model: string | null
-  flat_fee: number | null
-  commission_pct: number | null
-  currency: string
-  trybe_score: number | null
-  trybe_url: string | null
-}) {
+export function toBrandDeal(brand?: DealRow & { trybe_score: number | null, trybe_url: string | null }) {
   return {
-    pay_model: brand?.pay_model ?? undefined,
+    pay_types: [...(brand?.pay_types ?? [])],
     flat_fee: brand?.flat_fee ?? undefined,
+    retainer_fee: brand?.retainer_fee ?? undefined,
     commission_pct: brand?.commission_pct ?? undefined,
+    ad_spend_pct: brand?.ad_spend_pct ?? undefined,
     currency: brand?.currency ?? 'GBP',
     trybe_score: brand?.trybe_score ?? undefined,
     trybe_url: brand?.trybe_url ?? ''
   }
 }
 
-/** Column values to save from BrandDealFields. Amounts that don't apply to the pay model are cleared. */
+/** Column values to save from BrandDealFields. Amounts for income types that aren't ticked are cleared. */
 export function fromBrandDeal(deal: ReturnType<typeof toBrandDeal>) {
   const number = (value: number | undefined | string) => value === undefined || value === '' || Number.isNaN(Number(value)) ? null : Number(value)
   return {
-    pay_model: deal.pay_model ?? null,
-    flat_fee: deal.pay_model === 'flat' || deal.pay_model === 'both' ? number(deal.flat_fee) : null,
-    commission_pct: deal.pay_model === 'commission' || deal.pay_model === 'both' ? number(deal.commission_pct) : null,
+    ...payColumns(deal.pay_types, {
+      flat_fee: number(deal.flat_fee),
+      retainer_fee: number(deal.retainer_fee),
+      commission_pct: number(deal.commission_pct),
+      ad_spend_pct: number(deal.ad_spend_pct)
+    }),
     currency: deal.currency,
     trybe_score: number(deal.trybe_score),
     trybe_url: normalizeUrl(deal.trybe_url)
