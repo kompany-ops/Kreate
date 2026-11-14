@@ -282,7 +282,7 @@ function brollClipChanged(shot: Row<'broll_shots'>) {
 }
 
 // Clips added on set are saved on the phone; once the shoot is ended, Upload sends them to
-// Dropbox (spec §12); the uploader is in test mode until Dropbox is connected.
+// Dropbox (spec §12). There's no test mode: without Dropbox nothing uploads and the clips stay on the phone.
 // Clips go to the shoot's raw/ folder, by channel: hooks, VOs (beat by beat) and CTAs as files
 // named by code (H01.mov; a VO beat in its beat folder, problem/V01.mov), b-roll loose in its
 // beat folder under its own name.
@@ -299,7 +299,7 @@ const brollClipFolder = (shot: Row<'broll_shots'>, channelId: string | null) =>
   `${brollFolder(bundle.value, shot, channelId)}/`
 
 /** Clips added for a b-roll shot or an everyone-view item, to show their clip cards. */
-const { clipFor, taken, load: loadClips, discardBefore, resync, phones, waiting, uploadShoot, uploadRun, connected } = useClipUpload()
+const { clipFor, taken, load: loadClips, discardBefore, resync, phones, waiting, lost, uploadShoot, uploadRun } = useClipUpload()
 
 // The checklist is live on every phone: clips added elsewhere, ticks, skips, b-roll counts,
 // starting / ending the shoot and the upload request all reload it. Coming back to the app
@@ -338,6 +338,8 @@ onBeforeUnmount(() => {
 
 /** Clips on this phone still to go to Dropbox; Upload sends them once the shoot is ended. */
 const waitingClips = computed(() => waiting(shoot.value.code))
+/** clips the old test mode never sent and the phone no longer has: they need adding again */
+const lostClips = computed(() => lost(shoot.value.code))
 const waitingSize = computed(() => formatFileSize(waitingClips.value.reduce((total, clip) => total + clip.size, 0)))
 const shootEnded = computed(() => !['draft', 'planned', 'shooting'].includes(shoot.value.status))
 const uploadingThisShoot = computed(() => uploadRun.active && uploadRun.shoot === shoot.value.code)
@@ -461,6 +463,16 @@ function skipBroll(shot: Row<'broll_shots'>) {
     />
 
 
+    <UAlert
+      v-if="lostClips.length"
+      class="mt-4"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-file-x"
+      :title="`${lostClips.length} clip${lostClips.length === 1 ? ' was' : 's were'} never uploaded and ${lostClips.length === 1 ? 'isn\'t' : 'aren\'t'} on this phone any more`"
+      description="They were marked uploaded while Dropbox wasn't connected. Each one is marked below: add it again (from Photos if it's there, or film it again) and it uploads with the rest."
+    />
+
     <!-- clips saved on this phone, and once the shoot is ended, every phone's upload -->
     <div
       v-if="uploadingThisShoot || waitingClips.length || (shootEnded && phoneProgress.length)"
@@ -476,7 +488,7 @@ function skipBroll(shot: Row<'broll_shots'>) {
         <div class="min-w-0 flex-1 text-sm">
           <template v-if="uploadingThisShoot">
             <p class="font-medium text-highlighted">
-              This phone: uploading {{ Math.min(uploadRun.done + 1, uploadRun.total) }} of {{ uploadRun.total }}{{ connected ? '' : ' · test mode' }}
+              This phone: uploading {{ Math.min(uploadRun.done + 1, uploadRun.total) }} of {{ uploadRun.total }}
             </p>
             <p class="text-muted">
               Keep the app open until it's done.

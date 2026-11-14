@@ -121,10 +121,8 @@ async function removeClip() {
 const badge = computed(() => {
   switch (clip.value?.state) {
     case 'uploading': return { label: 'Uploading…', color: 'info' as const, icon: 'i-lucide-loader-circle' }
-    // real uploads have a full Dropbox path ("/UGC/…"); test-mode ones a relative one
-    case 'uploaded': return clip.value.path?.startsWith('/')
-      ? { label: 'Uploaded to Dropbox', color: 'success' as const, icon: 'i-lucide-cloud-check' }
-      : { label: 'Uploaded · test mode, not really sent', color: 'warning' as const, icon: 'i-lucide-flask-conical' }
+    case 'uploaded': return { label: 'Uploaded to Dropbox', color: 'success' as const, icon: 'i-lucide-cloud-check' }
+    case 'lost': return { label: 'Not uploaded and no longer on this phone · add it again', color: 'error' as const, icon: 'i-lucide-file-x' }
     case 'failed': return { label: 'Upload failed · retried with the rest', color: 'error' as const, icon: 'i-lucide-cloud-alert' }
     default: return { label: 'Saved on this phone', color: 'neutral' as const, icon: 'i-lucide-smartphone' }
   }

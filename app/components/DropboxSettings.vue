@@ -32,7 +32,7 @@ const disconnecting = ref(false)
 async function disconnect() {
   if (!(await confirmDialog({
     title: 'Disconnect Dropbox?',
-    description: 'Clips will upload in test mode until it\'s connected again. Clips already in Dropbox stay there.',
+    description: 'Clips can\'t upload, and shoots can\'t end, until it\'s connected again. Clips waiting on phones stay there; clips already in Dropbox stay there.',
     confirmLabel: 'Disconnect',
     danger: true
   }))) return
@@ -116,7 +116,7 @@ async function useFolder() {
             Not connected
           </p>
           <p class="text-sm text-muted">
-            Uploads run in test mode until Dropbox is connected.
+            Clips only upload to Dropbox: until it's connected, shoots can't end and clips wait on each phone.
           </p>
         </div>
         <UButton label="Connect Dropbox" icon="i-simple-icons-dropbox" :disabled="!status?.configured" @click="connect" />

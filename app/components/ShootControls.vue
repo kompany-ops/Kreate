@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Start / end a shoot on set: planned -> shooting -> filmed. Admins only; the database enforces it
 // and records who started and ended it, and when. Ending with shots still unticked asks first, and an ended
-// shoot with shots still unticked can be resumed.
+// shoot with shots still unticked can be resumed. A shoot can't end until Dropbox is connected: ending is what
+// opens the upload, and clips only ever go to Dropbox (the database refuses it too).
 const props = defineProps<{
   shoot: { id: string, status: string }
   /** items and b-roll shots not yet filmed or skipped */
@@ -13,6 +14,8 @@ const props = defineProps<{
 const emit = defineEmits<{ changed: [] }>()
 
 const db = useDb()
+const toast = useToast()
+const dropbox = useDropbox()
 const { isAdmin } = useAccess()
 const run = useAction()
 const busy = ref(false)
@@ -28,10 +31,32 @@ async function setStatus(status: 'shooting' | 'filmed', message: string) {
   if (ok) emit('changed')
 }
 
-const start = () => setStatus('shooting', 'Shoot started')
 const resume = () => setStatus('shooting', 'Shoot resumed')
 
-function end() {
+/** Dropbox has to be connected before a shoot can end (and is checked when it starts, so nobody finds out at the end). */
+async function dropboxReady(action: 'start' | 'end') {
+  const status = await dropbox.refresh().catch(() => null)
+  if (status?.connected) return true
+  toast.add({
+    title: action === 'end' ? 'Connect Dropbox before ending the shoot' : 'Dropbox isn\'t connected',
+    description: action === 'end'
+      ? 'Clips upload to Dropbox once the shoot ends. Connect it in Settings → Dropbox; the clips stay on each phone until then.'
+      : 'You can film, but the shoot can\'t end (and clips can\'t upload) until it\'s connected in Settings → Dropbox.',
+    color: action === 'end' ? 'error' : 'warning',
+    icon: 'i-lucide-cloud-off',
+    duration: 10000,
+    actions: [{ label: 'Settings', onClick: () => { navigateTo('/settings?tab=dropbox') } }]
+  })
+  return false
+}
+
+async function start() {
+  await dropboxReady('start')
+  await setStatus('shooting', 'Shoot started')
+}
+
+async function end() {
+  if (!(await dropboxReady('end'))) return
   if (props.remaining > 0) confirmingEnd.value = true
   else setStatus('filmed', 'Shoot ended')
 }

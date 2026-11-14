@@ -7,8 +7,12 @@
 // on each of the person's channels, so the clip is saved once under its first spot (`target`)
 // with the others in `also`, uploaded once and copied in Dropbox to the other channels' folders.
 
-/** saved: on this phone, waiting to be uploaded. failed: the upload didn't go through; retried with the rest. */
-export type ClipState = 'saved' | 'uploading' | 'uploaded' | 'failed'
+/**
+ * saved: on this phone, waiting to be uploaded. failed: the upload didn't go through; retried with
+ * the rest. lost: marked uploaded by the old test mode, which never sent it and let it go from
+ * this phone; it has to be added again (from Photos) and uploaded.
+ */
+export type ClipState = 'saved' | 'uploading' | 'uploaded' | 'failed' | 'lost'
 
 /** Another spot the same take fills: its target and where it goes in Dropbox (no extension). */
 export interface ClipSpot {
@@ -53,7 +57,7 @@ export interface AttachedClip {
   issues: string[]
 }
 
-/** Where a clip goes: Dropbox once it's connected (utils/dropboxUploader.ts), else the test-mode stub. */
+/** Where a clip goes: Dropbox (utils/dropboxUploader.ts). There's no test mode: without Dropbox, nothing uploads. */
 export interface ClipUploader {
   connected: boolean
   /**
@@ -68,25 +72,12 @@ export interface ClipUploader {
 }
 
 /**
- * Test mode until Dropbox is connected (spec §12): pretend to upload for about a second and
- * report success, so the end-of-shoot upload behaves as it will for real. Nothing leaves the phone.
+ * A clip the old test mode marked uploaded without sending it: its path is relative (a real
+ * upload's is the full Dropbox path, "/UGC/…").
  */
-const stubUploader: ClipUploader = {
-  connected: false,
-  upload(_file, path, _keepBoth, onProgress) {
-    return new Promise((resolve) => {
-      let step = 0
-      const timer = setInterval(() => {
-        onProgress(++step / 10)
-        if (step < 10) return
-        clearInterval(timer)
-        resolve({ uploaded: true, path })
-      }, 100)
-    })
-  },
-  copy: async (_from, to) => to,
-  writeText: async () => {}
-}
+const fakeUploaded = (clip: { state: string, path: string | null }) => clip.state === 'uploaded' && !clip.path?.startsWith('/')
+
+export const NO_DROPBOX = 'Dropbox isn\'t connected, so nothing was uploaded. Your clips are still on this phone: an admin connects Dropbox in Settings → Dropbox, then press Upload again.'
 
 /** One clip per target: a shoot item (or one beat of a VO), or one required clip of a b-roll shot for one channel. */
 export const clipTarget = {
@@ -179,7 +170,7 @@ const uploadRun = reactive({ active: false, shoot: '', total: 0, done: 0, failed
 export const useClipUpload = () => {
   const db = useDb()
   const dropbox = useDropbox()
-  /** Dropbox is connected, so uploads are real (otherwise test mode) */
+  /** Dropbox is connected: uploads only run when it is */
   const connected = computed(() => !!dropbox.status.value?.connected)
 
   type SharedRow = { target: string, shoot_id: string, file_name: string, state: string, created_by: string | null }
@@ -223,11 +214,14 @@ export const useClipUpload = () => {
       const stored = await inStore<StoredClip[]>('readonly', store => store.index('shoot').getAll(shoot.code))
       for (const row of stored) {
         if (clips.has(row.target)) continue
-        const clip = reactive<AttachedClip>({ ...row, also: row.also ?? [], url: row.file ? URL.createObjectURL(row.file) : '', progress: row.state === 'uploaded' ? 1 : 0 })
+        // a clip waiting to upload with no file left can't be sent: it's lost
+        const state = row.state !== 'uploaded' && !row.file ? 'lost' : row.state
+        const clip = reactive<AttachedClip>({ ...row, state, also: row.also ?? [], url: row.file ? URL.createObjectURL(row.file) : '', progress: row.state === 'uploaded' ? 1 : 0 })
         for (const spot of spotsOf(clip)) clips.set(spot.target, clip)
       }
     }
     await discardBefore(shoot.code, shoot.revertedAt)
+    await recover(shoot.code)
 
     await fetchShared(shoot)
 
@@ -278,6 +272,31 @@ export const useClipUpload = () => {
     const cutoff = Date.parse(revertedAt)
     for (const clip of uniqueClips()) {
       if (clip.shoot === shoot && (clip.savedAt ?? 0) < cutoff) await forget(clip)
+    }
+  }
+
+  /**
+   * Clips the old test mode marked uploaded without sending: they go back to waiting for upload.
+   * Its "upload" let go of the saved file, but the page still holds each clip it showed this
+   * session, so while the checklist hasn't been reloaded since, they're saved on the phone again.
+   * Any it can't get back are lost and have to be added again. Their shared records stop saying
+   * uploaded either way.
+   */
+  async function recover(shoot: string) {
+    for (const clip of uniqueClips()) {
+      if (clip.shoot !== shoot || !fakeUploaded(clip)) continue
+      if (!clip.file && clip.url) {
+        clip.file = await fetch(clip.url).then(response => response.blob()).catch(() => null)
+      }
+      clip.path = null
+      clip.progress = 0
+      clip.state = clip.file ? 'saved' : 'lost'
+      await inStore('readwrite', store => store.put(toStored(clip))).catch(() => {})
+      const shootId = shootIds.get(clip.shoot)
+      if (shootId) {
+        await db.from('shoot_clips').update({ state: 'saved', path: null })
+          .eq('shoot_id', shootId).in('target', spotsOf(clip).map(spot => spot.target))
+      }
     }
   }
 
@@ -370,14 +389,20 @@ export const useClipUpload = () => {
   /** Upload every clip of a shoot still on this phone, one at a time. Keep the app open while it runs. */
   async function uploadShoot(shoot: string) {
     if (uploadRun.active) return
-    const queue = uniqueClips().filter(clip => clip.shoot === shoot && (clip.state === 'saved' || clip.state === 'failed'))
+    await recover(shoot)
+    const queue = uniqueClips().filter(clip => clip.shoot === shoot && (clip.state === 'saved' || clip.state === 'failed') && !!clip.file)
     if (!queue.length) return
+    // only ever to Dropbox: without it nothing is touched, and the clips stay on the phone
+    const status = await dropbox.refresh().catch(() => null)
+    if (!status?.connected) {
+      Object.assign(uploadRun, { active: false, shoot, total: queue.length, done: 0, failed: 0, error: status ? NO_DROPBOX : 'Couldn\'t reach Kreate to check Dropbox, so nothing was uploaded. Your clips are still on this phone: try again on a good connection.' })
+      return
+    }
     Object.assign(uploadRun, { active: true, shoot, total: queue.length, done: 0, failed: 0, error: '' })
-    await dropbox.refresh().catch(() => {})
-    const uploader = connected.value ? dropboxUploader : stubUploader
+    const uploader = dropboxUploader
     // make sure the shoot's whole folder tree is there (only what's missing is added); uploads
     // create their own folders anyway, so a failure here doesn't stop them
-    if (connected.value) await $fetch('/api/dropbox/tree', { method: 'POST', body: { shootCode: shoot } }).catch(() => {})
+    await $fetch('/api/dropbox/tree', { method: 'POST', body: { shootCode: shoot } }).catch(() => {})
     let wakeLock: { release: () => Promise<void> } | null = null
     try {
       wakeLock = await (navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } })
@@ -410,7 +435,9 @@ export const useClipUpload = () => {
   }
 
   /** Clips of a shoot on this phone still to upload. */
-  const waiting = (shoot: string) => uniqueClips().filter(clip => clip.shoot === shoot && clip.state !== 'uploaded')
+  const waiting = (shoot: string) => uniqueClips().filter(clip => clip.shoot === shoot && clip.state !== 'uploaded' && clip.state !== 'lost')
+  /** Clips of a shoot that never reached Dropbox and aren't on this phone any more: add them again. */
+  const lost = (shoot: string) => uniqueClips().filter(clip => clip.shoot === shoot && clip.state === 'lost')
 
   return {
     connected,
@@ -427,6 +454,8 @@ export const useClipUpload = () => {
     remove,
     uploadShoot,
     waiting,
+    lost,
+    recover,
     uploadRun: readonly(uploadRun)
   }
 }
