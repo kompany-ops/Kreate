@@ -585,6 +585,31 @@ const exportItems = computed<DropdownMenuItem[][]>(() => [
     }
   ]
 ])
+
+/**
+ * The navbar's less-used actions, in one menu: exports, re-numbering, moving the shoot back, and
+ * stale. The next step (Mark as planned, or the checklist and Start / End) stays a button.
+ */
+const actionItems = computed<DropdownMenuItem[][]>(() => {
+  const admin = isAdmin.value
+  const status = shoot.value.status
+  return [
+    isDraft.value
+      ? (admin ? [{ label: 'Re-number codes', icon: 'i-lucide-list-ordered', onSelect: renumber }] : [])
+      : [{ label: 'Export', icon: 'i-lucide-download', children: exportItems.value }],
+    [
+      ...(admin && status === 'planned' ? [{ label: 'Back to draft', icon: 'i-lucide-lock-open', onSelect: () => { confirmUnplan.value = true } }] : []),
+      ...(admin && (status === 'shooting' || status === 'filmed') ? [{ label: 'Revert to planned', icon: 'i-lucide-history', onSelect: () => { confirmRevert.value = true } }] : []),
+      ...(admin
+        ? [{
+            label: stale.value ? 'Not stale' : 'Mark stale',
+            icon: stale.value ? 'i-lucide-archive-restore' : 'i-lucide-archive',
+            onSelect: () => stale.value ? setStale(false) : (confirmStale.value = true)
+          }]
+        : [])
+    ]
+  ].filter(group => group.length)
+})
 </script>
 
 <template>
@@ -604,28 +629,19 @@ const exportItems = computed<DropdownMenuItem[][]>(() => [
         </template>
         <template #right>
           <ShareToChat :share="{ type: 'shoot', id: shoot.id, title: `${shoot.code} · ${bundle.brand.name} — ${bundle.product.name}`, preview: SHOOT_STATUS_LABELS[shoot.status] ?? shoot.status, path: `/shoots/${shoot.code}` }" />
-          <UButton
-            v-if="isAdmin"
-            :label="stale ? 'Not stale' : 'Mark stale'"
-            :aria-label="stale ? 'Not stale' : 'Mark stale'"
-            :ui="ICON_ON_MOBILE"
-            class="max-sm:px-1.5"
-            :icon="stale ? 'i-lucide-archive-restore' : 'i-lucide-archive'"
-            color="neutral"
-            variant="ghost"
-            :loading="busy && stale"
-            @click="stale ? setStale(false) : confirmStale = true"
-          />
-          <template v-if="isDraft">
+          <UDropdownMenu v-if="actionItems.length" :items="actionItems" :content="{ align: 'end' }">
             <UButton
-              v-if="isAdmin"
-              label="Re-number"
-              icon="i-lucide-list-ordered"
+              label="Actions"
+              aria-label="More actions"
+              icon="i-lucide-ellipsis"
               color="neutral"
-              variant="ghost"
-              class="hidden sm:inline-flex"
-              @click="renumber"
+              variant="subtle"
+              :loading="busy && !isDraft"
+              :ui="ICON_ON_MOBILE"
+              class="max-sm:px-1.5"
             />
+          </UDropdownMenu>
+          <template v-if="isDraft">
             <UButton
               v-if="isAdmin"
               label="Mark as planned"
@@ -648,31 +664,6 @@ const exportItems = computed<DropdownMenuItem[][]>(() => [
               :color="shoot.status === 'shooting' ? 'primary' : 'neutral'"
               :variant="shoot.status === 'shooting' ? 'solid' : 'subtle'"
               :to="`/shoots/${shoot.code}/sheet`"
-            />
-            <UDropdownMenu :items="exportItems">
-              <UButton label="Export" aria-label="Export" icon="i-lucide-download" color="neutral" variant="subtle" :ui="ICON_ON_MOBILE" class="max-sm:px-1.5" />
-            </UDropdownMenu>
-            <UButton
-              v-if="isAdmin && shoot.status === 'planned'"
-              label="Back to draft"
-              aria-label="Back to draft"
-              :ui="ICON_ON_MOBILE"
-              class="max-sm:px-1.5"
-              icon="i-lucide-lock-open"
-              color="neutral"
-              variant="ghost"
-              @click="confirmUnplan = true"
-            />
-            <UButton
-              v-if="isAdmin && (shoot.status === 'shooting' || shoot.status === 'filmed')"
-              label="Revert"
-              aria-label="Revert the shoot to planned"
-              :ui="ICON_ON_MOBILE"
-              class="max-sm:px-1.5"
-              icon="i-lucide-history"
-              color="neutral"
-              variant="ghost"
-              @click="confirmRevert = true"
             />
             <ShootControls :shoot="shoot" :remaining="remaining" icon-on-mobile @changed="refresh" />
           </template>
