@@ -305,7 +305,9 @@ async function remove(shot: Row<'broll_shots'>) {
               />
               <UBadge
                 v-if="!props.filmedOn(shot).length"
-                :label="shot.feature_id ? 'No VO about this feature: nobody films it' : 'No VO with this beat: nobody films it'"
+                :label="shot.feature_id && isGeneral(shot) ? 'No VO about this feature: nobody films it'
+                  : shot.feature_id ? `No VO about this feature has a ${shot.beat} beat: nobody films it`
+                    : `No VO has a ${shot.beat} beat: nobody films it`"
                 icon="i-lucide-triangle-alert"
                 color="warning"
                 variant="subtle"
