@@ -1146,6 +1146,8 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
             :shots="bundle.broll"
             :formats="shootFormats"
             :draft="isDraft"
+            :filmed-on="(shot) => brollChannelIds(bundle, shot).map(id => bundle.channels.find(channel => channel.id === id)?.name ?? 'the shoot')"
+            :channel-count="bundle.channels.length"
             @changed="refresh"
           />
         </UCard>

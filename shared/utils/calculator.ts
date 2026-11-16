@@ -45,7 +45,8 @@ export interface CalcInput {
   people: { id: string, name: string }[]
   channels: { id: string, name: string }[]
   items: CalcItem[]
-  brollShots?: { channelId: string | null, status?: string }[]
+  /** `channels`: the channels that film it, when known (a feature's: only those with a VO about it) */
+  brollShots?: { channelId: string | null, status?: string, channels?: (string | null)[] }[]
   /** the share of valid recipes batched for submission */
   submissionRate: number
   /** b-roll selections per hook + VO + CTA, each its own recipe (default 1) */
@@ -147,8 +148,9 @@ export function calculate(input: CalcInput): CalcResult {
     if (!warnings.includes(message)) warnings.push(message)
   }
 
-  // Shared shots (no channel) are filmed for every channel.
-  const sharedBroll = broll.filter(shot => shot.channelId === null).length
+  // Shared shots (no channel) are filmed for every channel, unless the shot says which (a feature's)
+  const sharedBroll = broll.filter(shot => shot.channelId === null && !shot.channels).length
+  const filmedOn = (channelId: string) => broll.filter(shot => shot.channels ? shot.channels.includes(channelId) : shot.channelId === channelId).length
   const perChannel: ChannelResult[] = channels.map(channel => ({
     id: channel.id,
     name: channel.name,
@@ -156,7 +158,7 @@ export function calculate(input: CalcInput): CalcResult {
     recipes: 0,
     concepts: 0,
     submissions: 0,
-    brollShots: broll.filter(shot => shot.channelId === channel.id).length + sharedBroll
+    brollShots: filmedOn(channel.id) + sharedBroll
   }))
 
   /** one entry per recording: items sharing a recording key were filmed once */

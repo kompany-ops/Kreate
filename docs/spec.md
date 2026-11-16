@@ -308,7 +308,7 @@ Hooks, CTAs and VOs written in a shoot (`shoot_id` set) can be deleted (RLS), wh
 
 Snapshots matter: editing a template later must never change a shoot that's already planned.
 
-**broll_shots** — b-roll shot list; every channel films its own clips of each shot
+**broll_shots** — b-roll shot list; every channel films its own clips of each shot, except that a shot for a product feature is filmed only on the channels with a VO about that feature (it only ever goes under those VOs); with no such VO anywhere nobody films it, and the planner flags it
 - `shoot_id`, `format_id` (null = general product shots), `beat text`, `description text`
 - `feature_id` — the product feature the shot is for (set in the planner while the shoot is a draft): its clips go in `b-roll/<beat>/<feature slug>/` and only under VOs about that feature. Null = generic b-roll for its beat, used under any VO.
 - `clips_filmed int` — clips saved on set, across all channels (a shot with no `channel_id` is filmed for every channel on the shoot; each channel films as many clips of it as it likes)
@@ -448,7 +448,7 @@ Route: `/shoots/[code]/sheet?person=[slug]&show=[hook|cta|body|broll]`. Both fil
 - **Every deliverable gets its clip from the checklist** with **Add clip**, which picks a video from the phone. Every take is filmed, VOs and VO CTAs included: they're recorded on camera (selfie), so their picture is there for treatments such as greenscreen and picture-in-picture, and their sound plays over b-roll as before. A voiceover's length is checked against its script's reading time (Settings → Defaults). Clips are filmed and recorded in the phone's own apps (iOS compresses video its camera hands straight to a web page). **Takes:** each person films every item once per channel they're on; a line that doesn't say `{{dog}}` is one take for all of their channels (saved once, filling each channel's spot, uploaded once and copied in Dropbox to the other channels' folders), one that does is a take per channel. A VO is recorded **beat by beat**, one file per beat; the checklist asks for each beat to be filmed with the dog, doing something real, since any VO can play face to camera. An item is ticked off once every spot it has (every beat of a VO) has a clip; nothing can be ticked by hand. Removing a clip unticks it. Skip / unskip stays manual. Every wording of a beat is its own take (`problem/V01-2` beside `problem/V01`). A standalone VO's hook-beat takes are listed under **Hooks** and its CTA-beat takes under **CTAs**; only its other beats are under VOs.
   - **Everyone view:** each hook / CTA / VO once, with a row per person: their takes as Add clip buttons labelled by channel ("Nix + Whiskey", or a beat for a VO), Skip / Unskip for their whole entry, and their clips below. Per-person rewordings are listed under the item.
   - **Person view:** the same cards, just that person's row.
-- **B-roll:** a row per channel, each with an Add clip button (press it as often as you like) and its clips shown below once saved; each channel's clips go to that channel's b-roll folder. The shot is filmed once every channel has at least as many clips as the shoot's **B-roll variations** (each variation picks different clips). Filtered to a person, only the channels they're linked to show (shots with none are hidden). Skip covers the whole shot.
+- **B-roll:** a row per channel that films the shot (for a feature's shot, only channels with a VO about it), each with an Add clip button (press it as often as you like) and its clips shown below once saved; each channel's clips go to that channel's b-roll folder. The shot is filmed once every channel has at least as many clips as the shoot's **B-roll variations** (each variation picks different clips). Filtered to a person, only the channels they're linked to show (shots with none are hidden). Skip covers the whole shot.
 - **Sanity checks** before a clip is saved, with presets in Settings → Defaults → Clip checks:
   - Video: aspect ratio (default 9:16 vertical), resolution (default at least 1080×1920) and frame rate (default 24–60 fps, measured by playing the clip briefly; skipped if the browser can't measure it).
   - VO recordings and VO CTAs: length against the script's estimated reading time at the speech pace (default 60%–175% of it); under a second counts as empty.
@@ -462,7 +462,7 @@ Route: `/shoots/[code]/sheet?person=[slug]&show=[hook|cta|body|broll]`. Both fil
 
 ### b) CSV
 
-One row per shoot item and b-roll shot (a shared shot gets a row per channel): `shoot, person, kind, code, channel, hook_type, cta_mode, location, script, status, raw_path`, where `raw_path` is where the clip is uploaded: the file (without extension) for hooks, VOs and CTAs, the folder for b-roll. For VOs, beats joined as `[problem] … [product] … [result] …`.
+One row per shoot item and b-roll shot (a shared shot gets a row per channel that films it): `shoot, person, kind, code, channel, hook_type, cta_mode, location, script, status, raw_path`, where `raw_path` is where the clip is uploaded: the file (without extension) for hooks, VOs and CTAs, the folder for b-roll. For VOs, beats joined as `[problem] … [product] … [result] …`.
 
 ### c) The plan (in `manifest.json`)
 

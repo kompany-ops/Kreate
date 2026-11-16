@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { BrollShot } from '#shared/utils/loadShoot'
 import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { BundleItem, ShotGroup } from '#shared/utils/shootsheet'
 import type { Row } from '#shared/types/models'
@@ -130,18 +131,14 @@ const sections = computed(() => ([
 
 /**
  * Every channel films its own clips of a b-roll shot: a shared shot (no channel) is filmed for
- * each of the shoot's channels, a channel's own shot only for that channel.
- * Filtered to a person, only the channels they're linked to show.
+ * each of the shoot's channels, a channel's own shot only for that channel, and a product feature's
+ * only for channels with a VO about it (brollChannelIds). Filtered to a person, only the channels
+ * they're linked to show.
  */
-const brollChannels = (shot: Row<'broll_shots'>): { id: string | null, name: string | null }[] => {
-  const channels = shot.channel_id
-    ? bundle.value.channels.filter(channel => channel.id === shot.channel_id)
-    : bundle.value.channels
-  if (!channels.length) return [{ id: null, name: null }]
-  return channels
-    .filter(channel => !person.value || bundle.value.channelPeople?.[channel.id]?.includes(person.value.id))
-    .map(channel => ({ id: channel.id, name: channel.name }))
-}
+const brollChannels = (shot: Row<'broll_shots'>): { id: string | null, name: string | null }[] =>
+  brollChannelIds(bundle.value, shot as BrollShot)
+    .map(id => ({ id, name: bundle.value.channels.find(channel => channel.id === id)?.name ?? null }))
+    .filter(channel => !person.value || !channel.id || bundle.value.channelPeople?.[channel.id]?.includes(person.value.id))
 const visibleBroll = computed(() => notOnShoot.value ? [] : bundle.value.broll.filter(shot => brollChannels(shot).length))
 
 /** B-roll by beat. */
@@ -261,8 +258,7 @@ const nextBrollSlot = (shot: Row<'broll_shots'>, channelId: string | null) => {
   return Array.from({ length: MAX_BROLL_CLIPS }, (_, index) => index).find(index => !used.includes(index)) ?? null
 }
 const brollDone = (shot: Row<'broll_shots'>) => allChannelIds(shot).every(channelId => brollSlots(shot, channelId).length >= clipsNeeded.value)
-const allChannelIds = (shot: Row<'broll_shots'>): (string | null)[] =>
-  shot.channel_id ? [shot.channel_id] : bundle.value.channels.length ? bundle.value.channels.map(channel => channel.id) : [null]
+const allChannelIds = (shot: Row<'broll_shots'>): (string | null)[] => brollChannelIds(bundle.value, shot as BrollShot)
 async function saveBroll(shot: Row<'broll_shots'>, patch: { status: string, clips_filmed: number }) {
   const ok = await run(async () => {
     must(await db.from('broll_shots').update(patch).eq('id', shot.id))

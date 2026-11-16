@@ -119,6 +119,18 @@ describe('calculate: warnings and b-roll', () => {
     expect(result.totals.sharedBrollShots).toBe(1)
     expect(result.totals.brollShots).toBe(5)
   })
+
+  it('counts a feature’s b-roll only on the channels it’s filmed on', () => {
+    const result = calculate(base([], {
+      people: [people[0]!],
+      brollShots: [
+        { channelId: null },
+        { channelId: null, channels: ['whiskey'] },
+        { channelId: null, channels: [] }
+      ]
+    }))
+    expect(result.perChannel.map(channel => channel.brollShots)).toEqual([1, 2, 1])
+  })
 })
 
 describe('calculate: VOs linked to hooks and CTAs', () => {

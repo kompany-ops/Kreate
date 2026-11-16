@@ -34,6 +34,10 @@ const props = defineProps<{
   shots: BrollShot[]
   formats: BrollFormat[]
   draft: boolean
+  /** the channels that film a shot (a feature's: only those with a VO about it) */
+  filmedOn: (shot: BrollShot) => string[]
+  /** the shoot's channel count: a shot filmed on all of them says nothing */
+  channelCount: number
 }>()
 const emit = defineEmits<{ changed: [] }>()
 
@@ -299,6 +303,23 @@ async function remove(shot: Row<'broll_shots'>) {
                 :title="props.draft ? 'Only goes under VOs about this feature; Generic goes under any VO' : 'Set while the shoot is a draft: it names the clips\' folder'"
                 @update:model-value="update(shot, { feature_id: ($event as string | undefined) ?? null })"
               />
+              <template v-if="shot.feature_id">
+                <UBadge
+                  v-if="!props.filmedOn(shot).length"
+                  label="No VO about this feature: nobody films it"
+                  icon="i-lucide-triangle-alert"
+                  color="warning"
+                  variant="subtle"
+                  size="sm"
+                />
+                <UBadge
+                  v-else-if="props.filmedOn(shot).length < props.channelCount"
+                  :label="`Filmed on ${props.filmedOn(shot).join(', ')}`"
+                  color="neutral"
+                  variant="subtle"
+                  size="sm"
+                />
+              </template>
               <UBadge v-if="shot.status !== 'planned'" :label="shot.status" :color="ITEM_STATUS_COLORS[shot.status]" variant="subtle" size="sm" />
               <UButton
                 v-if="props.draft"

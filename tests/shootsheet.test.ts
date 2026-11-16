@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ShootBundle } from '../shared/utils/shootsheet'
 import {
+  brollChannelIds,
   brollFolder,
   buildCsv,
   buildShootsheet,
@@ -238,8 +239,27 @@ describe('skeleton zip', () => {
     const generic = brollFolder(b, { ...shot, feature: null }, b.channels[0]!.id)
     expect(brollFolder(b, shot, b.channels[0]!.id)).toBe(`${generic}/joint-support`)
     b.broll = [...b.broll, shot]
-    const folders = Object.keys(skeletonFiles(b)).map(path => path.slice(0, path.lastIndexOf('/')))
-    expect(folders).toContain(`${generic.replace('/raw/', '/edited/')}/joint-support`)
+    const folders = () => Object.keys(skeletonFiles(b)).map(path => path.slice(0, path.lastIndexOf('/')))
+    // no VO is about joint support yet, so nobody films its b-roll
+    expect(folders()).not.toContain(`${generic.replace('/raw/', '/edited/')}/joint-support`)
+    b.items = b.items.map(item => item.code === 'V01' ? { ...item, feature_slug: 'joint-support' } : item)
+    expect(folders()).toContain(`${generic.replace('/raw/', '/edited/')}/joint-support`)
+  })
+})
+
+describe('brollChannelIds', () => {
+  const channels = [{ id: 'c1' }, { id: 'c2' }]
+  const vo = (channel_id: string, feature_slug: string | null, status = 'planned') => ({ kind: 'body' as const, status, feature_slug, channel_id })
+  it('films generic b-roll on its own channel, or on every channel when shared', () => {
+    expect(brollChannelIds({ channels, items: [] }, { channel_id: 'c2', feature: null })).toEqual(['c2'])
+    expect(brollChannelIds({ channels, items: [] }, { channel_id: null, feature: null })).toEqual(['c1', 'c2'])
+  })
+  it('films a feature’s b-roll only on channels with a VO about that feature', () => {
+    const feature = { slug: 'joint-support', name: 'Joint support' }
+    const items = [vo('c1', 'calm'), vo('c2', 'joint-support'), vo('c1', 'joint-support', 'skipped')]
+    expect(brollChannelIds({ channels, items }, { channel_id: null, feature })).toEqual(['c2'])
+    expect(brollChannelIds({ channels, items }, { channel_id: 'c1', feature })).toEqual([])
+    expect(brollChannelIds({ channels, items: [vo('c1', 'calm')] }, { channel_id: null, feature })).toEqual([])
   })
 })
 

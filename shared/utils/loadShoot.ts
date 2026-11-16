@@ -5,7 +5,7 @@ import type { Database } from '../types/database.types'
 import type { Row } from '../types/models'
 import type { BundleItem, BundleTreatment, ShootBundle } from './shootsheet'
 import type { CalcInput, CalcSettings, CalcTreatment, ItemKind } from './calculator'
-import { beatShow, isFilmed, isStandalone, recordingKey } from './shootsheet'
+import { beatShow, brollChannelIds, isFilmed, isStandalone, recordingKey } from './shootsheet'
 import { beatWordings, parseBeats } from './slots'
 import { parseChannelSlots } from './orgProfile'
 
@@ -202,7 +202,12 @@ export function bundleToCalcInput(
       status: item.status,
       recordingKey: recordingKey(item, bundle.channelSlots)
     })),
-    brollShots: bundle.broll.map(shot => ({ channelId: shot.channel_id, status: shot.status })),
+    // a feature's b-roll is only filmed on channels with a VO about it
+    brollShots: bundle.broll.map(shot => ({
+      channelId: shot.channel_id ?? null,
+      status: shot.status,
+      ...(shot.feature ? { channels: brollChannelIds(bundle, shot) } : {})
+    })),
     submissionRate: Number(bundle.shoot.submission_rate),
     brollVariations: bundle.shoot.broll_variations,
     voVariations: bundle.shoot.vo_variations ?? 0,

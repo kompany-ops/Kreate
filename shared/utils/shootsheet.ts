@@ -530,8 +530,21 @@ function sortedItems(bundle: ShootBundle): BundleItem[] {
 }
 
 /** A shared shot (no channel) is filmed by every channel, into each channel's folder. */
-function brollChannelIds(bundle: ShootBundle, shot: Pick<BundleBroll, 'channel_id'>): (string | null)[] {
-  return shot.channel_id || !bundle.channels.length ? [shot.channel_id] : bundle.channels.map(channel => channel.id)
+/**
+ * The channels that film a b-roll shot: its own channel, or (a shared shot) every channel on the
+ * shoot. B-roll for a product feature only ever goes under VOs about that feature on the same
+ * channel, so it's only filmed on channels with such a VO; with none anywhere, nobody films it.
+ */
+export function brollChannelIds(
+  bundle: { channels: { id: string }[], items: Pick<BundleItem, 'kind' | 'status' | 'feature_slug' | 'channel_id'>[] },
+  shot: Pick<BundleBroll, 'channel_id' | 'feature'>
+): (string | null)[] {
+  const channels = shot.channel_id || !bundle.channels.length ? [shot.channel_id] : bundle.channels.map(channel => channel.id)
+  const feature = shot.feature?.slug
+  if (!feature) return channels
+  return channels.filter(channelId => bundle.items.some(item =>
+    item.kind === 'body' && item.status !== 'skipped' && item.feature_slug === feature
+    && (channelId === null || item.channel_id === channelId)))
 }
 
 function channelSlug(bundle: ShootBundle, channelId: string | null): string | null {
