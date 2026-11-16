@@ -1050,6 +1050,7 @@ export type Database = {
           emailed_at: string | null
           org_id: string
           role: string
+          shoot_ids: string[] | null
         }
         Insert: {
           channel_ids?: string[]
@@ -1060,6 +1061,7 @@ export type Database = {
           emailed_at?: string | null
           org_id?: string
           role?: string
+          shoot_ids?: string[] | null
         }
         Update: {
           channel_ids?: string[]
@@ -1070,6 +1072,7 @@ export type Database = {
           emailed_at?: string | null
           org_id?: string
           role?: string
+          shoot_ids?: string[] | null
         }
         Relationships: [
           {
@@ -1094,6 +1097,7 @@ export type Database = {
           display_name: string | null
           org_id: string
           role: string
+          shoot_ids: string[] | null
           updated_at: string
           user_id: string
         }
@@ -1102,6 +1106,7 @@ export type Database = {
           display_name?: string | null
           org_id: string
           role?: string
+          shoot_ids?: string[] | null
           updated_at?: string
           user_id: string
         }
@@ -1110,6 +1115,7 @@ export type Database = {
           display_name?: string | null
           org_id?: string
           role?: string
+          shoot_ids?: string[] | null
           updated_at?: string
           user_id?: string
         }
@@ -2703,6 +2709,7 @@ export type Database = {
           logo_url: string
           name: string
           role: string
+          shoot_ids: string[]
           slug: string
         }[]
       }

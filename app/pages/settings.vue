@@ -536,7 +536,7 @@ async function saveDefaults() {
                   {{ row.display_name }}
                 </p>
               </button>
-              <UBadge :label="roleLabel(row.role)" :color="roleColor(row.role)" variant="subtle" />
+              <UBadge :label="row.shoot_ids ? 'Guest' : roleLabel(row.role)" :color="roleColor(row.role)" variant="subtle" />
               <UButton
                 icon="i-lucide-trash-2"
                 color="error"
@@ -555,7 +555,7 @@ async function saveDefaults() {
                   Invited{{ row.emailed_at ? `, emailed ${emailedOn(row.emailed_at)}` : ', not emailed yet' }}: joins when they first sign in
                 </p>
               </button>
-              <UBadge :label="roleLabel(row.role)" :color="roleColor(row.role)" variant="subtle" />
+              <UBadge :label="row.shoot_ids ? 'Guest' : roleLabel(row.role)" :color="roleColor(row.role)" variant="subtle" />
               <UButton
                 :label="row.emailed_at ? 'Resend invite' : 'Email invite'"
                 icon="i-lucide-send"

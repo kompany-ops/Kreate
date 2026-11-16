@@ -6,6 +6,8 @@ interface Access {
   display_name: string | null
   /** what kind of account the current one is */
   kind: 'creator' | 'brand' | 'agency'
+  /** a guest's shoots (null: not a guest) */
+  shoot_ids: string[] | null
 }
 
 /**
@@ -24,7 +26,7 @@ export const useAccess = () => {
     try {
       const current = (await load()).find(org => org.is_current)
       access.value = current
-        ? { id: user.sub, email: user.email ?? '', role: current.role, display_name: current.display_name, kind: current.kind ?? 'creator' }
+        ? { id: user.sub, email: user.email ?? '', role: current.role, display_name: current.display_name, kind: current.kind ?? 'creator', shoot_ids: current.shoot_ids ?? null }
         : null
       checkedFor.value = user.sub
       return !!current
@@ -45,5 +47,8 @@ export const useAccess = () => {
   /** a brand or agency account: it publishes brands and never shoots */
   const isPublisher = computed(() => !!access.value && access.value.kind !== 'creator')
 
-  return { access, isAdmin, isOwner, isCast, isPublisher, ensure, reset }
+  /** a guest from outside the account, on just some of its shoots */
+  const isGuest = computed(() => !!access.value?.shoot_ids)
+
+  return { access, isAdmin, isOwner, isCast, isGuest, isPublisher, ensure, reset }
 }

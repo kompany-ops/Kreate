@@ -14,6 +14,8 @@ export interface MyOrg {
   logo_url: string | null
   /** creator (shoots), brand (one brand: its profile and library) or agency */
   kind: 'creator' | 'brand' | 'agency'
+  /** a guest: the shoots they're on (they see nothing else of the account); null for everyone else */
+  shoot_ids: string[] | null
 }
 
 /**

@@ -898,6 +898,7 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
                   @update:model-value="setPeople"
                 />
               </UFormField>
+              <PlannerGuests v-if="isAdmin" :shoot-id="shoot.id" :shoot-code="shoot.code" :channels="bundle.channels" :draft="isDraft" @changed="refresh" />
               <UFormField label="Channels" help="Defaults to the brand's channels">
                 <USelectMenu
                   :model-value="channelIds"

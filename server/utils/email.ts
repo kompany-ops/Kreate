@@ -102,7 +102,7 @@ export async function sendEmail(event: H3Event, message: { to: string, subject: 
 /** The invite to join an organisation, from the person who sent it. */
 export function inviteEmail(options: { orgName: string, inviterName: string, email: string, role: string, link: string }) {
   const { orgName, inviterName, email, role, link } = options
-  const as = role === 'team' ? 'part of the team' : 'part of the cast'
+  const as = role === 'team' ? 'part of the team' : role === 'guest' ? 'a guest on one of its shoots' : 'part of the cast'
   const html = emailLayout({
     preheader: `${inviterName} invited you to ${orgName} on Kreate.`,
     heading: `Join ${orgName} on Kreate`,

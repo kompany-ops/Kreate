@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
   if (!email) throw createError({ statusCode: 400, statusMessage: 'Which email?' })
 
   // RLS keeps this to the current org's invites
-  const { data: invite } = await db.from('org_invites').select('email, role').eq('email', email).maybeSingle()
+  const { data: invite } = await db.from('org_invites').select('email, role, shoot_ids').eq('email', email).maybeSingle()
   if (!invite) throw createError({ statusCode: 404, statusMessage: 'There\'s no invite for that email' })
 
   const user = await serverSupabaseUser(event)
@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
 
   const origin = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
   const link = `${origin}/login?${new URLSearchParams({ invite: email, org: orgName })}`
-  const message = inviteEmail({ orgName, inviterName, email, role: invite.role, link })
+  const message = inviteEmail({ orgName, inviterName, email, role: invite.shoot_ids ? 'guest' : invite.role, link })
 
   const sent = await sendEmail(event, {
     to: email,
