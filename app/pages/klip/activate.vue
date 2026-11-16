@@ -72,7 +72,7 @@ const orgName = computed(() => orgs.value.find(org => org.id === orgId.value)?.n
         <UFormField label="Code" :error="valid === false ? 'That code has expired or was already used. Start again in Klip.' : false">
           <UInput v-model="code" class="w-full" size="xl" :ui="{ base: 'text-center font-mono tracking-widest' }" placeholder="XXXX-XXXX" autofocus />
         </UFormField>
-        <UFormField v-if="orgs.length > 1" label="Organisation">
+        <UFormField v-if="orgs.length > 1" label="Account">
           <USelect v-model="orgId" :items="orgItems" class="w-full" />
         </UFormField>
         <p v-if="error" class="text-sm text-error">

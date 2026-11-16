@@ -76,7 +76,7 @@ const signingOutKlip = ref(false)
 async function signOutKlip() {
   if (!(await confirmDialog({
     title: 'Sign Klip out everywhere?',
-    description: `Everyone in ${currentOrg.value?.name ?? 'this organisation'} is signed out of Klip on every computer the next time it checks in (computers offline right now within 72 hours). Each one connects again with a new code from Kreate.`,
+    description: `Everyone in ${currentOrg.value?.name ?? 'this account'} is signed out of Klip on every computer the next time it checks in (computers offline right now within 72 hours). Each one connects again with a new code from Kreate.`,
     confirmLabel: 'Sign out everywhere',
     danger: true
   }))) return

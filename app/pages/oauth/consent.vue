@@ -50,7 +50,7 @@ const { access } = useAccess()
 /** What the app can do, in plain words (the scopes are Supabase's sign-in ones). */
 const permissions = computed(() => [
   'Read your brands, products, Library and shoots',
-  'Read each organisation\'s voice and script rules',
+  'Read each account\'s voice and script rules',
   'Add hooks and CTAs to your Library, tagged for you to review',
   ...(details.value?.scope.split(' ').includes('email') ? ['See your email address'] : [])
 ])
@@ -111,7 +111,7 @@ async function answer(approve: boolean) {
 
         <UFormField
           v-if="orgs.length > 1"
-          label="Organisations it can use"
+          label="Accounts it can use"
           help="You'll tell it which one you mean as you go. Change these any time in Your account → Connect your AI."
         >
           <OrgChecklist v-model="orgIds" :orgs="orgs" />

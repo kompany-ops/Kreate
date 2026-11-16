@@ -69,7 +69,7 @@ async function saveOrg() {
   await run(async () => {
     must(await db.from('orgs').update({ name }).eq('id', currentOrg.value!.id))
     await loadOrgs()
-  }, 'Organisation renamed')
+  }, 'Account renamed')
   saving.value = false
 }
 
@@ -262,7 +262,7 @@ async function saveMember() {
 
 async function removeMember(row: typeof members.value[number]) {
   if (!(await confirmDialog({
-    title: `Remove ${row.profile?.email} from the organisation?`,
+    title: `Remove ${row.profile?.email} from the account?`,
     description: 'They lose access immediately and come off their channels. Past shoots keep them.',
     confirmLabel: 'Remove',
     danger: true
@@ -427,7 +427,7 @@ async function saveDefaults() {
           <UCard>
             <template #header>
               <h3 class="font-semibold text-highlighted">
-                Organisation
+                Account
               </h3>
             </template>
             <div class="mb-4 flex items-center gap-4">
@@ -454,13 +454,13 @@ async function saveDefaults() {
                   />
                 </div>
                 <p class="text-xs text-muted">
-                  Shown in the organisation switcher. PNG, JPG, WebP or GIF, up to 2 MB.
+                  Shown in the account switcher. PNG, JPG, WebP or GIF, up to 2 MB.
                 </p>
               </div>
               <input ref="logoInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" @change="uploadLogo">
             </div>
             <div class="grid gap-4 sm:grid-cols-2">
-              <UFormField label="Name" required help="Shown in the organisation switcher and to everyone in it">
+              <UFormField label="Name" required help="Shown in the account switcher and to everyone in it">
                 <UInput v-model="profile.org_name" class="w-full" />
               </UFormField>
               <UFormField label="Slug" help="Its short ID. It doesn't change.">
@@ -600,7 +600,7 @@ async function saveDefaults() {
                 Chat updates
               </h3>
               <p class="text-sm text-muted">
-                What Kreate posts to the organisation's chat by itself.
+                What Kreate posts to the account's chat by itself.
               </p>
             </template>
             <div class="grid gap-3 sm:grid-cols-2">

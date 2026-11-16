@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
 
   const { customer, subscription } = await ensureCustomer(event, orgId)
   if (isEntitled(subscription?.status)) {
-    throw createError({ statusCode: 409, statusMessage: 'This organisation already has a plan: change it with Manage billing.' })
+    throw createError({ statusCode: 409, statusMessage: 'This account already has a plan: change it with Manage billing.' })
   }
   const price = await priceFor(event, plan.lookupKey!)
 

@@ -116,7 +116,7 @@ const plans = computed(() => PLAN_ORDER.map((id) => {
           variant="subtle"
           icon="i-lucide-shield-x"
           title="No access"
-          description="That account isn't in an organisation. Ask someone on its team to invite your email, then sign in again."
+          description="You're not part of an account yet. Ask someone on its team to invite your email, then sign in again."
           class="text-left"
         />
 
@@ -154,7 +154,7 @@ const plans = computed(() => PLAN_ORDER.map((id) => {
       </div>
     </UCard>
 
-    <UModal v-model:open="signUpOpen" :title="`Start your ${plan} trial`" description="Create your account. You'll set up your organisation next.">
+    <UModal v-model:open="signUpOpen" :title="`Start your ${plan} trial`" description="Create your login. You'll set up your account next.">
       <template #body>
         <AuthForm mode="sign-up" :plan="plan" @switch="switchTo" />
       </template>

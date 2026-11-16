@@ -82,7 +82,7 @@ const date = (value: string) => new Date(value).toLocaleDateString(undefined, { 
           Use your own AI with Kreate
         </h3>
         <p class="text-sm text-muted">
-          Connect the AI app you already use, such as Claude or ChatGPT, and ask it to write hooks, CTAs and VOs for your organisation.
+          Connect the AI app you already use, such as Claude or ChatGPT, and ask it to write hooks, CTAs and VOs for your account.
           It reads your brands, Library, shoots and your voice from Settings → Scripts, and adds what it writes to your Library for you to review.
         </p>
       </template>
@@ -137,7 +137,7 @@ const date = (value: string) => new Date(value).toLocaleDateString(undefined, { 
               </template>
             </p>
           </div>
-          <UButton v-if="orgs.length > 1" label="Organisations" size="sm" color="neutral" variant="outline" @click="editOrgs(grant)" />
+          <UButton v-if="orgs.length > 1" label="Accounts" size="sm" color="neutral" variant="outline" @click="editOrgs(grant)" />
           <UButton label="Disconnect" size="sm" color="neutral" variant="ghost" @click="disconnect(grant)" />
         </li>
       </ul>
@@ -145,7 +145,7 @@ const date = (value: string) => new Date(value).toLocaleDateString(undefined, { 
 
     <UModal
       :open="!!editing"
-      :title="`Organisations ${editing?.client.name ?? 'it'} can use`"
+      :title="`Accounts ${editing?.client.name ?? 'it'} can use`"
       description="It only reaches the ones ticked. You tell it which one you mean as you go."
       @update:open="value => { if (!value) editing = null }"
     >

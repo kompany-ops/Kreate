@@ -88,11 +88,11 @@ const saveRules = () => save({
           Your voice
         </h3>
         <p class="text-sm text-muted">
-          Who {{ currentOrg?.name ?? 'your organisation' }} is and how its scripts should sound. When you connect your own AI to Kreate, it's told this before it writes anything.
+          Who {{ currentOrg?.name ?? 'your account' }} is and how its scripts should sound. When you connect your own AI to Kreate, it's told this before it writes anything.
         </p>
       </template>
       <div class="grid gap-4 sm:grid-cols-2">
-        <UFormField label="What does your organisation do?">
+        <UFormField label="What does your account do?">
           <UInput v-model="profile.about" class="w-full" placeholder="a UGC agency making ads for beauty brands" />
         </UFormField>
         <UFormField label="What are your ad categories?" class="sm:col-span-2">

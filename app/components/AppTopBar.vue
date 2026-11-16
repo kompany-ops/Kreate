@@ -32,8 +32,8 @@ const orgItems = computed(() => [
     }
   })),
   [
-    { label: 'All organisations', icon: 'i-lucide-layout-grid', to: '/account' },
-    ...(canCreateOrg.value ? [{ label: 'New organisation', icon: 'i-lucide-plus', to: '/onboarding' }] : [])
+    { label: 'All accounts', icon: 'i-lucide-layout-grid', to: '/account' },
+    ...(canCreateOrg.value ? [{ label: 'New account', icon: 'i-lucide-plus', to: '/onboarding' }] : [])
   ]
 ])
 
@@ -95,7 +95,7 @@ const accountItems = computed(() => [
         variant="ghost"
         class="min-w-0 data-[state=open]:bg-elevated"
         :ui="{ label: 'truncate', trailingIcon: 'text-dimmed' }"
-        aria-label="Switch organisation"
+        aria-label="Switch account"
       />
     </UDropdownMenu>
 

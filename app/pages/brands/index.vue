@@ -59,6 +59,18 @@ async function loadPartners() {
   partnerOf.value = new Map(rows.map(row => [row.linked_brand_id!, row.publisher_name]))
 }
 const fromPartner = (brand: BrandRow) => brand.source_brand_id ? partnerOf.value.get(brand.id) ?? 'a partner' : null
+/** the groups a creator's brands fall into, with how many in each (only the ones they have) */
+const sourceTabs = computed(() => {
+  const live = brands.value.filter(brand => !brand.archived_at)
+  const count = (pick: (brand: BrandRow) => boolean) => live.filter(pick).length
+  const via = (brand: BrandRow) => !!brand.source_brand_id && !!partnerLabel(brand)?.startsWith('Via')
+  return [
+    { label: `All (${live.length})`, value: 'all' },
+    { label: `Your own (${count(brand => !brand.source_brand_id)})`, value: 'mine' },
+    ...(count(brand => !!brand.source_brand_id && !via(brand)) ? [{ label: `Partnerships (${count(brand => !!brand.source_brand_id && !via(brand))})`, value: 'partners' }] : []),
+    ...(count(via) ? [{ label: `Via agencies (${count(via)})`, value: 'agencies' }] : [])
+  ]
+})
 /** "From Calm Co" for a brand's own; "Via Paw Agency" for one an agency brings */
 const partnerLabel = (brand: BrandRow) => {
   const partner = fromPartner(brand)
@@ -118,7 +130,7 @@ const DEFAULT_FILTERS = {
   category: 'all',
   channel: 'all',
   matched: 'all',
-  /** all, mine (your own brands) or partners (partner brands) */
+  /** all, mine (your own brands), partners (from a brand) or agencies (via an agency) */
   source: 'all',
   starred: false
 }
@@ -186,7 +198,9 @@ const filtered = computed(() => {
         ? !brand.brand_channels.length
         : brand.brand_channels.some(link => link.channel_id === filters.channel)))
       && (filters.matched === 'all' || data.matched === filters.matched)
-      && (filters.source === 'all' || (filters.source === 'mine' ? !brand.source_brand_id : !!brand.source_brand_id))
+      && (filters.source === 'all' || (filters.source === 'mine'
+        ? !brand.source_brand_id
+        : !!brand.source_brand_id && (partnerLabel(brand)?.startsWith('Via') ? 'agencies' : 'partners') === filters.source))
   })
   // brands without the sorted value go last
   const desc = (pick: (brand: BrandRow) => number | null) => (a: BrandRow, b: BrandRow) =>
@@ -359,9 +373,7 @@ async function save() {
                 <UFormField label="Channel">
                   <USelect v-model="filters.channel" :items="channelFilterOptions" class="w-full" />
                 </UFormField>
-                <UFormField label="Whose">
-                  <USelect v-model="filters.source" :items="[{ label: 'All brands', value: 'all' }, { label: 'Your own', value: 'mine' }, { label: 'Partnerships', value: 'partners' }]" class="w-full" />
-                </UFormField>
+
                 <UFormField label="Scrybe match">
                   <USelect v-model="filters.matched" :items="matchedOptions" class="w-full" />
                 </UFormField>
@@ -419,6 +431,16 @@ async function save() {
           <span v-else class="text-xs text-muted">Switch to a creator account you're on the team of to accept it.</span>
         </div>
       </div>
+
+      <!-- whose brands: your own, partnerships with brands, and brands an agency brings -->
+      <UTabs
+        v-if="sourceTabs.length > 2"
+        v-model="filters.source"
+        :items="sourceTabs"
+        :content="false"
+        variant="link"
+        class="mb-4 w-full"
+      />
 
       <UModal :open="!!accepting" :title="accepting ? `Partner with ${accepting.brand_name}` : ''" @update:open="open => { if (!open) accepting = null }">
         <template #body>

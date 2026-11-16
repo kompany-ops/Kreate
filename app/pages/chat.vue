@@ -195,7 +195,7 @@ function onKeydown(event: KeyboardEvent) {
 <template>
   <UDashboardPanel id="chat" :ui="{ body: 'p-0 sm:p-0 gap-0' }">
     <template #header>
-      <UDashboardNavbar :title="`${currentOrg?.name ?? 'Organisation'} chat`">
+      <UDashboardNavbar :title="`${currentOrg?.name ?? 'Account'} chat`">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
@@ -216,7 +216,7 @@ function onKeydown(event: KeyboardEvent) {
                 Say hello to {{ currentOrg?.name ?? 'your team' }}
               </p>
               <p class="max-w-sm text-sm">
-                Everyone in the organisation sees this chat. Share hooks, CTAs, brands and shoots from their menus, and Kreate posts here when shoots move along.
+                Everyone in the account sees this chat. Share hooks, CTAs, brands and shoots from their menus, and Kreate posts here when shoots move along.
               </p>
             </div>
 

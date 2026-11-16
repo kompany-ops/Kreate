@@ -44,10 +44,17 @@ export const useOrg = () => {
     window.location.assign(path)
   }
 
-  async function switchOrg(id: string) {
+  async function switchOrg(id: string, path?: string) {
     const { error } = await db.rpc('set_active_org', { p_org_id: id })
     if (error) throw error
-    await enter()
+    const org = orgs.value.find(entry => entry.id === id)
+    await enter(path ?? (org ? orgHome(org) : '/library'))
+  }
+
+  /** Where an account opens: a creator's Library, a brand's Brand page, an agency's brands, a guest's shoots. */
+  function orgHome(org: Pick<MyOrg, 'kind' | 'shoot_ids'>) {
+    if (org.shoot_ids) return '/shoots'
+    return org.kind === 'brand' ? '/brand' : org.kind === 'agency' ? '/brands' : '/library'
   }
 
   /** Start an account of a kind; its profile (who it is and how its scripts sound) is saved with it. */
@@ -64,5 +71,5 @@ export const useOrg = () => {
     return !!data
   }
 
-  return { orgs, currentOrg, needsPicker, load, switchOrg, createOrg, signupOpen }
+  return { orgs, currentOrg, needsPicker, load, switchOrg, orgHome, createOrg, signupOpen }
 }

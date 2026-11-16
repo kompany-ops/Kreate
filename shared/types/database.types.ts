@@ -2742,6 +2742,21 @@ export type Database = {
           team_used: number
         }[]
       }
+      my_shoots: {
+        Args: never
+        Returns: {
+          brand_name: string
+          code: string
+          on_camera: boolean
+          org_id: string
+          org_logo_url: string
+          org_name: string
+          product_name: string
+          role: string
+          shoot_date: string
+          status: string
+        }[]
+      }
       org_license_state: {
         Args: { p_org_id: string }
         Returns: {

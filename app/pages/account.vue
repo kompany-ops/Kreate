@@ -2,20 +2,22 @@
 import type { MyOrg } from '~/composables/useOrg'
 import type { Database } from '#shared/types/database.types'
 
-// Your account: everything that's yours rather than an organisation's, in three tabs (kept in the
-// URL as ?tab=): Organisations (each at a glance; open one, or start another), Profile (name,
-// photo, email, password) and Connect your AI. Billing stays with each organisation (its Settings).
+// Your account: everything that's yours rather than an account's, in four tabs (kept in the URL as
+// ?tab=): My shoots (the shoots you're involved in, across every account: public.my_shoots), Accounts
+// (each at a glance; open one, or start another), Profile (name, photo, email, password) and Connect
+// your AI. Billing stays with each account (its Settings).
 definePageMeta({ layout: 'account' })
 
 const tabs = [
-  { label: 'Organisations', value: 'organisations', icon: 'i-lucide-building-2' },
+  { label: 'My shoots', value: 'shoots', icon: 'i-lucide-clapperboard' },
+  { label: 'Accounts', value: 'organisations', icon: 'i-lucide-building-2' },
   { label: 'Profile', value: 'profile', icon: 'i-lucide-user-round' },
   { label: 'Connect your AI', value: 'ai', icon: 'i-lucide-plug' }
 ]
 const route = useRoute()
 const router = useRouter()
 // older links used #ai
-const tabFrom = (value: unknown) => tabs.some(t => t.value === value) ? String(value) : route.hash === '#ai' ? 'ai' : 'organisations'
+const tabFrom = (value: unknown) => tabs.some(t => t.value === value) ? String(value) : route.hash === '#ai' ? 'ai' : 'shoots'
 const tab = ref(tabFrom(route.query.tab))
 watch(() => route.query.tab, value => (tab.value = tabFrom(value)))
 watch(tab, (value) => {
@@ -25,7 +27,7 @@ watch(tab, (value) => {
 const supabase = useSupabaseClient()
 const toast = useToast()
 const run = useAction()
-const { orgs, load: loadOrgs, switchOrg, signupOpen } = useOrg()
+const { orgs, load: loadOrgs, switchOrg, orgHome, signupOpen } = useOrg()
 const { profile, load: loadProfile, save, uploadPhoto, removePhoto } = useProfile()
 const { reset } = useAccess()
 
@@ -37,9 +39,29 @@ async function loadSummaries(): Promise<Summary[]> {
   if (error) throw error
   return (data ?? []) as Summary[]
 }
+// the shoots you're involved in, across every account
+type MyShoot = Database['public']['Functions']['my_shoots']['Returns'][number]
+const myShoots = shallowRef<MyShoot[]>([])
+const shootGroups = computed(() => {
+  const groups = new Map<string, { org: { id: string, name: string, logo: string | null }, shoots: MyShoot[] }>()
+  for (const shoot of myShoots.value) {
+    const group = groups.get(shoot.org_id) ?? { org: { id: shoot.org_id, name: shoot.org_name, logo: shoot.org_logo_url }, shoots: [] }
+    group.shoots.push(shoot)
+    groups.set(shoot.org_id, group)
+  }
+  return [...groups.values()]
+})
+async function openShoot(shoot: MyShoot) {
+  const path = `/shoots/${shoot.code}`
+  if (orgs.value.find(org => org.id === shoot.org_id)?.is_current) return navigateTo(path)
+  opening.value = shoot.org_id
+  if (!(await run(() => switchOrg(shoot.org_id, path)))) opening.value = null
+}
+
 await Promise.all([
   loadOrgs(),
   loadProfile(),
+  supabase.rpc('my_shoots').then(({ data }) => (myShoots.value = (data ?? []) as MyShoot[])),
   // the at-a-glance numbers are extra: the cards still show without them
   loadSummaries().then(rows => (summaries.value = new Map(rows.map(row => [row.org_id, row])))).catch(() => {})
 ])
@@ -50,7 +72,7 @@ onMounted(async () => {
 // --- organisations ---------------------------------------------------------
 const opening = ref<string | null>(null)
 async function open(org: MyOrg) {
-  if (org.is_current) return navigateTo('/library')
+  if (org.is_current) return navigateTo(orgHome(org))
   opening.value = org.id
   if (!(await run(() => switchOrg(org.id)))) opening.value = null
 }
@@ -223,8 +245,37 @@ async function signOut() {
       :ui="{ list: 'overflow-x-auto overflow-y-hidden' }"
     />
 
-    <!-- Organisations -->
-    <section v-if="tab === 'organisations'" class="space-y-3">
+    <!-- My shoots -->
+    <section v-if="tab === 'shoots'" class="space-y-6">
+      <div v-for="group in shootGroups" :key="group.org.id" class="space-y-2">
+        <h2 class="flex items-center gap-2 text-sm font-medium text-muted">
+          <img v-if="group.org.logo" :src="group.org.logo" alt="" class="size-5 rounded object-cover">
+          {{ group.org.name }}
+        </h2>
+        <div class="divide-y divide-default rounded-lg border border-default">
+          <button
+            v-for="shoot in group.shoots"
+            :key="shoot.code"
+            type="button"
+            class="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left hover:bg-elevated/50"
+            :disabled="opening === shoot.org_id"
+            @click="openShoot(shoot)"
+          >
+            <span class="font-mono font-medium text-highlighted">{{ shoot.code }}</span>
+            <span class="min-w-0 flex-1 truncate text-sm">{{ shoot.brand_name }} — {{ shoot.product_name }}</span>
+            <span class="text-sm text-muted tabular-nums">{{ shoot.shoot_date ? formatDate(shoot.shoot_date) : 'No date' }}</span>
+            <UBadge v-if="shoot.on_camera" label="On camera" color="neutral" variant="outline" size="sm" />
+            <UBadge :label="SHOOT_STATUS_LABELS[shoot.status] ?? shoot.status" :color="SHOOT_STATUS_COLORS[shoot.status]" variant="subtle" size="sm" class="capitalize" />
+          </button>
+        </div>
+      </div>
+      <p v-if="!myShoots.length" class="py-8 text-center text-sm text-muted">
+        No shoots for you right now. Shoots you're on camera for, and your team's shoots on their way to Live, show here.
+      </p>
+    </section>
+
+    <!-- Accounts -->
+    <section v-else-if="tab === 'organisations'" class="space-y-3">
       <div class="grid gap-3 sm:grid-cols-2">
         <button
           v-for="org in orgs"
@@ -240,8 +291,8 @@ async function signOut() {
               <p class="truncate font-medium text-highlighted">
                 {{ org.name }}
               </p>
-              <p class="text-xs text-muted capitalize">
-                {{ roleLabel(org.role) }}
+              <p class="text-xs text-muted">
+                {{ org.shoot_ids ? `Guest on ${org.shoot_ids.length} shoot${org.shoot_ids.length === 1 ? '' : 's'}` : roleLabel(org.role) }}<template v-if="org.kind !== 'creator'"> · {{ org.kind === 'brand' ? 'Brand account' : 'Agency' }}</template>
               </p>
             </div>
             <!-- the one they were last in -->
@@ -333,7 +384,7 @@ async function signOut() {
           <span class="flex size-10 items-center justify-center rounded-full bg-elevated">
             <UIcon name="i-lucide-plus" class="size-5" />
           </span>
-          <span class="font-medium">New organisation</span>
+          <span class="font-medium">New account</span>
         </NuxtLink>
       </div>
     </section>
@@ -346,7 +397,7 @@ async function signOut() {
             Profile
           </h2>
           <p class="text-sm text-muted">
-            The same in every organisation you're in.
+            The same in every account you're in.
           </p>
         </template>
         <div class="space-y-4">

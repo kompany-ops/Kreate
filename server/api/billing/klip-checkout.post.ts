@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
 
   const { data: org } = await db.from('orgs').select('billing_exempt, klip_purchased_at').eq('id', orgId).single()
   if (org?.klip_purchased_at || org?.billing_exempt) {
-    throw createError({ statusCode: 409, statusMessage: 'This organisation already has Klip.' })
+    throw createError({ statusCode: 409, statusMessage: 'This account already has Klip.' })
   }
   const { data: sub } = await db.from('org_subscriptions').select('plan, status').eq('org_id', orgId).maybeSingle()
   if (sub?.plan === 'studio' && isEntitled(sub.status)) throw createError({ statusCode: 409, statusMessage: 'Studio includes Klip already.' })

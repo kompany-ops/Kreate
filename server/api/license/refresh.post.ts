@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
     db.from('org_members').select('org_id').eq('org_id', license.orgId).eq('user_id', license.userId).maybeSingle(),
     db.from('orgs').select('klip_signed_out_at').eq('id', license.orgId).maybeSingle()
   ])
-  if (!data) throw createError({ statusCode: 401, statusMessage: 'You\'re no longer in this organisation: sign in again' })
+  if (!data) throw createError({ statusCode: 401, statusMessage: 'You\'re no longer in this account: sign in again' })
   if (org?.klip_signed_out_at && license.issuedAt < Date.parse(org.klip_signed_out_at)) throw createError({ statusCode: 401, statusMessage: 'Klip was signed out on all devices: sign in again' })
   return await issueLicense(event, license.orgId, license.userId)
 })
