@@ -117,6 +117,20 @@ export const dropboxUploader: ClipUploader = {
     }
   },
 
+  /** Delete an uploaded file (a full path, or `relative` to the root); fine if it's already gone. */
+  async remove(path, relative = false) {
+    const { root } = await getAccess()
+    await withRetries(token => $fetch('https://api.dropboxapi.com/2/files/delete_v2', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: { path: relative ? `${root}/${path}` : path }
+    }).catch((error) => {
+      const body = JSON.stringify((error as { data?: unknown }).data ?? '')
+      if (body.includes('not_found')) return
+      throw new DropboxError((error as { response?: { status?: number } }).response?.status ?? 0, body)
+    }))
+  },
+
   /** Write a small text file (captions) relative to the root, replacing what's there. */
   async writeText(path, text) {
     const { root } = await getAccess()

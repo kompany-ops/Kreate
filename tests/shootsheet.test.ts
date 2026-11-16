@@ -102,7 +102,12 @@ describe('shared shot list', () => {
   it('files a shared b-roll shot under every channel, by beat for a format\'s shots', () => {
     const b = bundle()
     b.broll.push({ channel_id: null, format_id: 'f2', beat: 'result', description: 'happy dog', status: 'planned' })
-    expect(buildShootsheet(b).broll.map(shot => shot.raw_folder)).toEqual(expect.arrayContaining([
+    // only topdognix has a VO with that beat so far
+    const folders = () => buildShootsheet(b).broll.map(shot => shot.raw_folder)
+    expect(folders()).not.toContain('pawco/calming-chews/shoots/S014/raw/topdogwhiskey/b-roll/result')
+    const vo = b.items.find(item => item.code === 'V01')!
+    b.items.push({ ...vo, id: 'i5', channel_id: 'c2' })
+    expect(folders()).toEqual(expect.arrayContaining([
       'pawco/calming-chews/shoots/S014/raw/topdognix/b-roll/result',
       'pawco/calming-chews/shoots/S014/raw/topdogwhiskey/b-roll/result'
     ]))
@@ -250,16 +255,26 @@ describe('skeleton zip', () => {
 describe('brollChannelIds', () => {
   const channels = [{ id: 'c1' }, { id: 'c2' }]
   const vo = (channel_id: string, feature_slug: string | null, status = 'planned') => ({ kind: 'body' as const, status, feature_slug, channel_id })
-  it('films generic b-roll on its own channel, or on every channel when shared', () => {
-    expect(brollChannelIds({ channels, items: [] }, { channel_id: 'c2', feature: null })).toEqual(['c2'])
-    expect(brollChannelIds({ channels, items: [] }, { channel_id: null, feature: null })).toEqual(['c1', 'c2'])
+  const general = { feature: null, format_id: null, beat: 'product' }
+  it('films a general product shot on its own channel, or on every channel when shared', () => {
+    expect(brollChannelIds({ channels, items: [] }, { ...general, channel_id: 'c2' })).toEqual(['c2'])
+    expect(brollChannelIds({ channels, items: [] }, { ...general, channel_id: null })).toEqual(['c1', 'c2'])
+  })
+  it('films a format’s b-roll only on channels with a VO that has its beat', () => {
+    const items = [
+      { ...vo('c1', null), format: { beats: ['problem', 'product'] } },
+      { ...vo('c2', null), format: { beats: ['not because'] } }
+    ]
+    expect(brollChannelIds({ channels, items }, { channel_id: null, feature: null, format_id: 'f1', beat: 'product' })).toEqual(['c1'])
+    expect(brollChannelIds({ channels, items }, { channel_id: null, feature: null, format_id: 'f2', beat: 'not because' })).toEqual(['c2'])
+    expect(brollChannelIds({ channels, items }, { channel_id: null, feature: null, format_id: 'f1', beat: 'result' })).toEqual([])
   })
   it('films a feature’s b-roll only on channels with a VO about that feature', () => {
     const feature = { slug: 'joint-support', name: 'Joint support' }
     const items = [vo('c1', 'calm'), vo('c2', 'joint-support'), vo('c1', 'joint-support', 'skipped')]
-    expect(brollChannelIds({ channels, items }, { channel_id: null, feature })).toEqual(['c2'])
-    expect(brollChannelIds({ channels, items }, { channel_id: 'c1', feature })).toEqual([])
-    expect(brollChannelIds({ channels, items: [vo('c1', 'calm')] }, { channel_id: null, feature })).toEqual([])
+    expect(brollChannelIds({ channels, items }, { ...general, channel_id: null, feature })).toEqual(['c2'])
+    expect(brollChannelIds({ channels, items }, { ...general, channel_id: 'c1', feature })).toEqual([])
+    expect(brollChannelIds({ channels, items: [vo('c1', 'calm')] }, { ...general, channel_id: null, feature })).toEqual([])
   })
 })
 

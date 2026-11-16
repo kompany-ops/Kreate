@@ -333,7 +333,7 @@ onBeforeUnmount(() => {
   clearTimeout(reloadTimer)
 })
 
-/** Clips on this phone still to go to Dropbox; Upload sends them once the shoot is ended. */
+/** Clips on this phone still to go to Dropbox: they go up as they're saved, or once back online. */
 const waitingClips = computed(() => waiting(shoot.value.code))
 /** clips the old test mode never sent and the phone no longer has: they need adding again */
 const lostClips = computed(() => lost(shoot.value.code))
@@ -485,10 +485,10 @@ function skipBroll(shot: Row<'broll_shots'>) {
         <div class="min-w-0 flex-1 text-sm">
           <template v-if="uploadingThisShoot">
             <p class="font-medium text-highlighted">
-              This phone: uploading {{ Math.min(uploadRun.done + 1, uploadRun.total) }} of {{ uploadRun.total }}
+              This phone: uploading {{ Math.min(uploadRun.done + 1, uploadRun.total) }} of {{ uploadRun.total }} to Dropbox
             </p>
             <p class="text-muted">
-              Keep the app open until it's done.
+              Keep filming: clips go up as you save them. Keep the app open while they do.
             </p>
           </template>
           <template v-else-if="waitingClips.length">
@@ -499,17 +499,11 @@ function skipBroll(shot: Row<'broll_shots'>) {
               {{ waitingClips.length }} clip{{ waitingClips.length === 1 ? '' : 's' }} saved on this phone · {{ waitingSize }}
             </p>
             <p class="text-muted">
-              <template v-if="!shootEnded">
-                Upload them to Dropbox once the shoot is ended.
-              </template>
-              <template v-else-if="waitingClips.some(clip => clip.state === 'failed')">
-                Some uploads didn't go through. Try again on a good connection.
-              </template>
-              <template v-else-if="uploadRequested">
-                Uploading starts by itself. Keep the app open while it runs.
+              <template v-if="waitingClips.some(clip => clip.state === 'failed')">
+                Some uploads didn't go through. They try again when the phone is back online, or press Try again.
               </template>
               <template v-else>
-                Upload sends every phone's clips. Each phone needs the app open while it runs.
+                Waiting to upload: they go to Dropbox by themselves while the app is open and online.
               </template>
             </p>
           </template>
@@ -523,12 +517,12 @@ function skipBroll(shot: Row<'broll_shots'>) {
           </template>
         </div>
         <UButton
-          v-if="shootEnded && !uploadingThisShoot && (!uploadRequested || waitingClips.some(clip => clip.state === 'failed'))"
-          :label="uploadRequested ? 'Try again' : 'Upload all phones'"
+          v-if="!uploadingThisShoot && (waitingClips.length || (shootEnded && !uploadRequested))"
+          :label="waitingClips.length ? 'Try again' : 'Upload all phones'"
           icon="i-lucide-cloud-upload"
           size="sm"
           :loading="requesting"
-          @click="uploadRequested ? uploadClips() : requestUploadAll()"
+          @click="waitingClips.length ? uploadClips() : requestUploadAll()"
         />
       </div>
       <UProgress v-if="uploadingThisShoot" :model-value="uploadRun.done" :max="uploadRun.total" size="sm" />

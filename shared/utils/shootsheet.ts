@@ -540,18 +540,22 @@ function sortedItems(bundle: ShootBundle): BundleItem[] {
 /** A shared shot (no channel) is filmed by every channel, into each channel's folder. */
 /**
  * The channels that film a b-roll shot: its own channel, or (a shared shot) every channel on the
- * shoot. B-roll for a product feature only ever goes under VOs about that feature on the same
- * channel, so it's only filmed on channels with such a VO; with none anywhere, nobody films it.
+ * shoot, but only those it can be used on. B-roll only ever goes under a VO on the same channel:
+ * a format's shot under VOs with its beat (beats are filed by name, so any format with it), and a
+ * product feature's only under VOs about that feature. So it's filmed on channels with such a VO;
+ * with none anywhere, nobody films it. General product shots (no format) are filmed everywhere.
  */
 export function brollChannelIds(
-  bundle: { channels: { id: string }[], items: Pick<BundleItem, 'kind' | 'status' | 'feature_slug' | 'channel_id'>[] },
-  shot: Pick<BundleBroll, 'channel_id' | 'feature'>
+  bundle: { channels: { id: string }[], items: (Pick<BundleItem, 'kind' | 'status' | 'feature_slug' | 'channel_id'> & { format?: { beats: string[] } | null })[] },
+  shot: Pick<BundleBroll, 'channel_id' | 'feature' | 'format_id' | 'beat'>
 ): (string | null)[] {
   const channels = shot.channel_id || !bundle.channels.length ? [shot.channel_id] : bundle.channels.map(channel => channel.id)
   const feature = shot.feature?.slug
-  if (!feature) return channels
+  if (!feature && !shot.format_id) return channels
   return channels.filter(channelId => bundle.items.some(item =>
-    item.kind === 'body' && item.status !== 'skipped' && item.feature_slug === feature
+    item.kind === 'body' && item.status !== 'skipped'
+    && (!feature || item.feature_slug === feature)
+    && (!shot.format_id || !!item.format?.beats.includes(shot.beat))
     && (channelId === null || item.channel_id === channelId)))
 }
 

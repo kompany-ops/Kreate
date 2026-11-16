@@ -200,11 +200,11 @@ export function bundleToCalcInput(
       status: item.status,
       recordingKey: recordingKey(item, bundle.channelSlots)
     })),
-    // a feature's b-roll is only filmed on channels with a VO about it
+    // b-roll is only filmed on channels with a VO it can go under (its beat, its feature)
     brollShots: bundle.broll.map(shot => ({
       channelId: shot.channel_id ?? null,
       status: shot.status,
-      ...(shot.feature ? { channels: brollChannelIds(bundle, shot) } : {})
+      ...(shot.feature || shot.format_id ? { channels: brollChannelIds(bundle, shot) } : {})
     })),
     submissionRate: Number(bundle.shoot.submission_rate),
     brollVariations: bundle.shoot.broll_variations,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Add a clip for one checklist target from the phone (Photos or Files) and save it on the
-// phone through useClipUpload; saved clips go to Dropbox when Upload is pressed after the shoot (spec §12).
+// phone through useClipUpload, which sends it to Dropbox straight away (spec §12). Replace and Remove
+// take an uploaded clip out of Dropbox too.
 // Clips are filmed and recorded in the phone's own apps: iOS compresses anything its camera
 // hands straight to a web page (to 480×360), so the app doesn't film or record itself.
 // A clip added on another phone shows here too (ticked, with whose phone it's on), so nobody
@@ -107,14 +108,19 @@ async function onPick(event: Event) {
 async function removeClip() {
   const uploaded = clip.value?.state === 'uploaded'
   if (!(await confirmDialog({
-    title: 'Remove this clip?',
+    title: uploaded ? 'Remove this clip from Dropbox?' : 'Remove this clip?',
     description: uploaded
-      ? 'It will be unticked until another clip is saved. The copy already uploaded stays in Dropbox.'
+      ? 'It will be deleted from Dropbox and unticked until another clip is saved. To swap it for a better take, use Replace instead.'
       : 'It will be deleted from this phone and unticked until another clip is saved.',
     confirmLabel: 'Remove',
     danger: true
   }))) return
-  await remove(props.target)
+  try {
+    await remove(props.target)
+  } catch {
+    toast.add({ title: 'Couldn\'t remove it from Dropbox', description: 'Check your connection and try again. The clip is still there.', color: 'error', icon: 'i-lucide-cloud-alert' })
+    return
+  }
   emit('removed')
 }
 
@@ -123,8 +129,8 @@ const badge = computed(() => {
     case 'uploading': return { label: 'Uploading…', color: 'info' as const, icon: 'i-lucide-loader-circle' }
     case 'uploaded': return { label: 'Uploaded to Dropbox', color: 'success' as const, icon: 'i-lucide-cloud-check' }
     case 'lost': return { label: 'Not uploaded and no longer on this phone · add it again', color: 'error' as const, icon: 'i-lucide-file-x' }
-    case 'failed': return { label: 'Upload failed · retried with the rest', color: 'error' as const, icon: 'i-lucide-cloud-alert' }
-    default: return { label: 'Saved on this phone', color: 'neutral' as const, icon: 'i-lucide-smartphone' }
+    case 'failed': return { label: 'Upload failed · tries again when you\'re back online', color: 'error' as const, icon: 'i-lucide-cloud-alert' }
+    default: return { label: 'Saved on this phone · waiting to upload', color: 'neutral' as const, icon: 'i-lucide-smartphone' }
   }
 })
 </script>
