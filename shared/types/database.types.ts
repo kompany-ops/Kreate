@@ -2630,6 +2630,38 @@ export type Database = {
         }[]
       }
       org_signup_open: { Args: never; Returns: boolean }
+      partner_item_results: {
+        Args: { p_brand_id: string }
+        Returns: {
+          archived: boolean
+          item_id: string
+          kind: string
+          label: string
+          losers: number
+          mids: number
+          shoots: number
+          winners: number
+        }[]
+      }
+      partner_shoots: {
+        Args: { p_brand_id: string }
+        Returns: {
+          batches: number
+          batches_measured: number
+          channels: string[]
+          clips_edited: number
+          code: string
+          creator_name: string
+          ended_at: string
+          partnership_active: boolean
+          product_name: string
+          renders: number
+          shoot_date: string
+          shoot_id: string
+          started_at: string
+          status: string
+        }[]
+      }
       post_ai_drafts_event: {
         Args: { p_count: number; p_kind: string }
         Returns: undefined

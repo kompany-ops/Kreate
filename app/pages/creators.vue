@@ -20,7 +20,13 @@ async function load() {
   ])
   brand.value = must(b)
   partnerships.value = must(p)
+  // how many shoots each partnered creator has made for the brand (Results has the rest)
+  if (brand.value) {
+    const { data } = await db.rpc('partner_shoots', { p_brand_id: brand.value.id })
+    shootCounts.value = (data ?? []).reduce((counts, row) => counts.set(row.creator_name, (counts.get(row.creator_name) ?? 0) + 1), new Map<string, number>())
+  }
 }
+const shootCounts = ref(new Map<string, number>())
 await load()
 
 const groups = computed(() => [
@@ -121,7 +127,10 @@ async function end(row: Row<'partnerships'>) {
                 </p>
                 <p class="text-sm text-muted">
                   <template v-if="row.status === 'active'">
-                    {{ row.invited_email }} · partnered {{ day(row.accepted_at) }}
+                    {{ row.invited_email }} · partnered {{ day(row.accepted_at) }} ·
+                    <NuxtLink :to="{ path: '/results', query: { creator: row.creator_name ?? undefined } }" class="text-highlighted hover:underline">
+                      {{ shootCounts.get(row.creator_name ?? '') ?? 0 }} shoot{{ shootCounts.get(row.creator_name ?? '') === 1 ? '' : 's' }}
+                    </NuxtLink>
                   </template>
                   <template v-else-if="row.status === 'invited'">
                     Invited {{ day(row.created_at) }}{{ row.emailed_at ? `, emailed ${day(row.emailed_at)}` : ', not emailed yet' }}
