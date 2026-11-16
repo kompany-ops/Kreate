@@ -6,16 +6,17 @@ const db = useDb()
 const run = useAction()
 const { confirmDialog } = useConfirm()
 const { people, channels, settings, load } = useRefData()
-const { access } = useAccess()
+const { access, isOwner } = useAccess()
+const { plan, teamFull, loadPlan, buyTeamPlace } = usePlan()
 const { currentOrg, load: loadOrgs } = useOrg()
 
-// The organisation's settings, for its admins. Your own name, email, password and AI apps are in
+// The organisation's settings, for its team. Your own name, email, password and AI apps are in
 // Your account (/account).
 const tabs = [
   { label: 'Profile', value: 'profile', icon: 'i-lucide-building-2' },
   { label: 'Channels', value: 'channels', icon: 'i-lucide-tv' },
   { label: 'Scripts', value: 'scripts', icon: 'i-lucide-pen-line' },
-  { label: 'Members', value: 'members', icon: 'i-lucide-shield-check' },
+  { label: 'Team and cast', value: 'members', icon: 'i-lucide-users' },
   { label: 'Defaults', value: 'defaults', icon: 'i-lucide-timer' },
   { label: 'Dropbox', value: 'dropbox', icon: 'i-simple-icons-dropbox' }
 ]
@@ -48,7 +49,7 @@ async function loadPersonChannels() {
   personChannels.value = must(await db.from('person_channels').select('person_id, channel_id'))
 }
 
-await Promise.all([load(true), loadMembers(), loadPersonChannels(), loadOrgs()])
+await Promise.all([load(true), loadMembers(), loadPersonChannels(), loadOrgs(), loadPlan()])
 
 const saving = ref(false)
 
@@ -179,22 +180,31 @@ async function saveChannel() {
   if (ok) channelOpen.value = false
 }
 
-// --- members -----------------------------------------------------------------
-// Admins invite by email; members don't pay. An invite becomes a membership when someone signs
-// in with that email, by Google or a confirmed email account (straight away if they already have).
+// --- team and cast ---------------------------------------------------------
+// The team invites by email. Cast are on camera and free; team members plan and run the account, and
+// only the owner adds or removes them (the plan includes some, and more cost extra). An invite
+// becomes a membership when someone signs in with that email, by Google or a confirmed email
+// account (straight away if they already have).
 const userOpen = ref(false)
-const member = reactive({ user_id: '', invited: false, email: '', role: 'member', display_name: '' })
+const member = reactive({ user_id: '', invited: false, email: '', role: 'cast', display_name: '', was: '' })
 const requestUserOpen = useGuardedClose(userOpen, member)
-const roles = [{ label: 'Member', value: 'member' }, { label: 'Admin', value: 'admin' }]
+const roles = computed(() => [
+  { label: 'Cast: on camera, free', value: 'cast' },
+  { label: 'Team: plans and runs the account', value: 'team', disabled: !isOwner.value },
+  ...(member.role === 'owner' ? [{ label: 'Owner', value: 'owner' }] : [])
+])
 const isSelf = (userId: string) => userId === access.value?.id
+const roleColor = (role: string) => role === 'cast' ? 'neutral' as const : 'primary' as const
+/** "2 of 3", or "2" when unlimited */
+const used = (count: number, limit: number | null) => limit === null ? String(count) : `${count} of ${limit}`
 
 function editMember(row?: typeof members.value[number]) {
-  Object.assign(member, { user_id: row?.user_id ?? '', invited: false, email: row?.profile?.email ?? '', role: row?.role ?? 'member', display_name: row?.display_name ?? '' })
+  Object.assign(member, { user_id: row?.user_id ?? '', invited: false, email: row?.profile?.email ?? '', role: row?.role ?? 'cast', display_name: row?.display_name ?? '', was: row?.role ?? '' })
   userOpen.value = true
 }
 
 function editInvite(row: Row<'org_invites'>) {
-  Object.assign(member, { user_id: '', invited: true, email: row.email, role: row.role, display_name: row.display_name ?? '' })
+  Object.assign(member, { user_id: '', invited: true, email: row.email, role: row.role, display_name: row.display_name ?? '', was: row.role })
   userOpen.value = true
 }
 
@@ -219,6 +229,14 @@ async function emailInvite(email: string, quiet = false) {
 const emailedOn = (value: string | null) => value ? new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : ''
 
 async function saveMember() {
+  // a new team member past the plan's places: the owner buys another one first
+  if (member.role === 'team' && member.was !== 'team' && teamFull.value) {
+    if (plan.value?.plan === 'free') {
+      useToast().add({ title: 'Free includes just you on the team', description: 'Choose a plan in Settings → Profile to add team members, or add them as cast.', color: 'warning' })
+      return
+    }
+    if (!(await buyTeamPlace())) return
+  }
   saving.value = true
   const isNew = !member.user_id && !member.invited
   const newEmail = member.email.trim().toLowerCase()
@@ -231,8 +249,8 @@ async function saveMember() {
     }
     else if (member.invited) must(await db.from('org_invites').update(fields).eq('email', member.email))
     else must(await db.from('org_invites').insert({ ...fields, email: member.email.trim().toLowerCase() }))
-    await Promise.all([load(true), loadMembers()])
-  }, isNew ? undefined : 'Members updated')
+    await Promise.all([load(true), loadMembers(), loadPlan()])
+  }, isNew ? undefined : 'Saved')
   saving.value = false
   if (!ok) return
   userOpen.value = false
@@ -254,14 +272,14 @@ async function removeMember(row: typeof members.value[number]) {
       must(await db.from('people').update({ active: false }).eq('id', person.id))
     }
     must(await db.from('org_members').delete().eq('user_id', row.user_id))
-    await Promise.all([load(true), loadMembers(), loadPersonChannels()])
+    await Promise.all([load(true), loadMembers(), loadPersonChannels(), loadPlan()])
   }, 'Removed')
 }
 
 async function removeInvite(row: Row<'org_invites'>) {
   await run(async () => {
     must(await db.from('org_invites').delete().eq('email', row.email))
-    await loadMembers()
+    await Promise.all([loadMembers(), loadPlan()])
   }, 'Invite removed')
 }
 
@@ -495,9 +513,14 @@ async function saveDefaults() {
         <!-- Members -->
         <template v-else-if="tab === 'members'">
           <div class="flex items-center justify-between">
-            <p class="text-sm text-muted">
-              Only these people can use this organisation. Members don't pay.
-            </p>
+            <div class="space-y-1">
+              <p class="text-sm text-muted">
+                The team plans and runs the account. Cast are on camera: they film and tick off their own shots, and don't pay.
+              </p>
+              <p v-if="plan" class="text-sm text-highlighted">
+                Team {{ used(plan.team_used, plan.team_limit) }} · Cast {{ used(plan.cast_used, plan.cast_limit) }}
+              </p>
+            </div>
             <UButton icon="i-lucide-plus" label="Invite" @click="editMember()" />
           </div>
           <div class="divide-y divide-default rounded-lg border border-default">
@@ -510,13 +533,13 @@ async function saveDefaults() {
                   {{ row.display_name }}
                 </p>
               </button>
-              <UBadge :label="row.role" :color="row.role === 'admin' ? 'primary' : 'neutral'" variant="subtle" class="capitalize" />
+              <UBadge :label="roleLabel(row.role)" :color="roleColor(row.role)" variant="subtle" />
               <UButton
                 icon="i-lucide-trash-2"
                 color="error"
                 variant="ghost"
                 aria-label="Remove"
-                :disabled="isSelf(row.user_id)"
+                :disabled="isSelf(row.user_id) || row.role === 'owner' || (row.role === 'team' && !isOwner)"
                 @click="removeMember(row)"
               />
             </div>
@@ -529,7 +552,7 @@ async function saveDefaults() {
                   Invited{{ row.emailed_at ? `, emailed ${emailedOn(row.emailed_at)}` : ', not emailed yet' }}: joins when they first sign in
                 </p>
               </button>
-              <UBadge :label="row.role" :color="row.role === 'admin' ? 'primary' : 'neutral'" variant="subtle" class="capitalize" />
+              <UBadge :label="roleLabel(row.role)" :color="roleColor(row.role)" variant="subtle" />
               <UButton
                 :label="row.emailed_at ? 'Resend invite' : 'Email invite'"
                 icon="i-lucide-send"
@@ -679,8 +702,8 @@ async function saveDefaults() {
             <UFormField label="Display name">
               <UInput v-model="member.display_name" class="w-full" />
             </UFormField>
-            <UFormField label="Role" :help="isSelf(member.user_id) ? 'You can\'t change your own role' : undefined">
-              <USelect v-model="member.role" :items="roles" class="w-full" :disabled="isSelf(member.user_id)" />
+            <UFormField label="Role" :help="isSelf(member.user_id) ? 'You can\'t change your own role' : !isOwner ? 'Only the owner adds team members' : undefined">
+              <USelect v-model="member.role" :items="roles" class="w-full" :disabled="isSelf(member.user_id) || member.role === 'owner' || (member.was === 'team' && !isOwner)" />
             </UFormField>
           </div>
         </template>

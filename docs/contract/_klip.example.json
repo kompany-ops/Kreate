@@ -1,0 +1,69 @@
+{
+  "schema_version": 2,
+  "klip_version": "0.1.0",
+  "plan_hash": "sha256:3f1c9a7e5b2d4c8f",
+  "shoot": "S001",
+  "updated_at": "2026-11-15T10:00:00Z",
+  "complete": false,
+  "takes": [
+    {
+      "spot": "wellbymak/vo/makayla/hook/V01",
+      "raw_file": "wellbymak/vo/makayla/hook/V01.mov",
+      "role": "hook",
+      "status": "edited",
+      "files": {
+        "clip": "wellbymak/vo/makayla/hook/V01.mp4",
+        "captions": "wellbymak/vo/makayla/hook/V01.captions.webm",
+        "cutout": "wellbymak/vo/makayla/hook/V01.cutout.webm"
+      },
+      "duration": 3.833,
+      "frames": 230,
+      "fps": 60,
+      "text": {
+        "search_query": "why am i always tired even with coffee",
+        "placed_text": { "text": "Third coffee by 11am.", "x": 0.5, "y": 0.3 }
+      },
+      "review": { "needed": false, "reasons": [], "notes": [] }
+    },
+    {
+      "spot": "wellbymak/vo/makayla/problem/V01",
+      "raw_file": "wellbymak/vo/makayla/problem/V01.mov",
+      "role": "beat",
+      "status": "edited",
+      "files": {
+        "clip": "wellbymak/vo/makayla/problem/V01.mp4",
+        "captions": "wellbymak/vo/makayla/problem/V01.captions.webm",
+        "cutout": null
+      },
+      "duration": 4.9,
+      "frames": 294,
+      "fps": 60,
+      "review": { "needed": true, "reasons": ["Claude's confidence is 0.52"], "notes": [] }
+    },
+    {
+      "spot": "wellbymak/vo/makayla/cta/V01",
+      "raw_file": "wellbymak/vo/makayla/cta/V01.mov",
+      "role": "cta",
+      "status": "failed",
+      "files": { "clip": null, "captions": null, "cutout": null },
+      "duration": null,
+      "frames": null,
+      "fps": null,
+      "review": { "needed": true, "reasons": ["edit failed: no speech found"], "notes": [] }
+    }
+  ],
+  "broll": [
+    {
+      "file": "wellbymak/b-roll/problem/IMG_7687.mp4",
+      "raw_file": "wellbymak/b-roll/problem/IMG_7687.mov",
+      "status": "edited",
+      "duration": 1.75,
+      "frames": 105,
+      "fps": 60
+    }
+  ],
+  "unknown": [
+    { "raw_file": "wellbymak/vo/makayla/cta/V02.mov", "reason": "duplicate" },
+    { "raw_file": "wellbymak/vo/makayla/cta/V02 (1).mov", "reason": "duplicate" }
+  ]
+}

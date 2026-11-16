@@ -50,12 +50,12 @@ export async function requireMember(event: H3Event) {
   const { data } = await db.rpc('my_orgs')
   const current = data?.find(org => org.is_current)
   if (!current) throw createError({ statusCode: 403, statusMessage: 'No access' })
-  return { db, admin: current.role === 'admin', orgId: current.id, entitled: current.entitled }
+  return { db, admin: isTeamRole(current.role), owner: current.role === 'owner', orgId: current.id, entitled: current.entitled }
 }
 
 export async function requireAdmin(event: H3Event) {
   const access = await requireMember(event)
-  if (!access.admin) throw createError({ statusCode: 403, statusMessage: 'Only admins can connect Dropbox' })
+  if (!access.admin) throw createError({ statusCode: 403, statusMessage: 'Only the team can connect Dropbox' })
   return access.db
 }
 
@@ -86,12 +86,12 @@ export async function revokeDropboxToken(accessToken: string) {
 export async function dropboxAccess(event: H3Event, db: Awaited<ReturnType<typeof serverSupabaseClient<Database>>>) {
   const app = dropboxApp(event)
   const { data } = await db.from('dropbox_connection').select('refresh_token_enc, root').maybeSingle()
-  if (!data) throw createError({ statusCode: 409, statusMessage: 'Dropbox isn\'t connected. An admin can connect it in Settings.' })
+  if (!data) throw createError({ statusCode: 409, statusMessage: 'Dropbox isn\'t connected. Someone on the team can connect it in Settings.' })
   try {
     const token = await dropboxToken(event, { grant_type: 'refresh_token', refresh_token: decryptToken(data.refresh_token_enc, app.secret) })
     return { accessToken: token.access_token, expiresIn: token.expires_in, root: data.root }
   } catch {
-    throw createError({ statusCode: 409, statusMessage: 'The Dropbox connection has stopped working. An admin needs to reconnect it in Settings.' })
+    throw createError({ statusCode: 409, statusMessage: 'The Dropbox connection has stopped working. Someone on the team needs to reconnect it in Settings.' })
   }
 }
 

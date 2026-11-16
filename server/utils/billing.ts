@@ -1,9 +1,10 @@
 import Stripe from 'stripe'
 import type { H3Event } from 'h3'
-import { serverSupabaseServiceRole } from '#supabase/server'
+import { serverSupabaseServiceRole, serverSupabaseUser } from '#supabase/server'
 import type { Database } from '#shared/types/database.types'
 
-// Billing (Phase 4): one Kreate subscription per org, through Stripe Checkout with Managed
+// Billing (docs/spec.md §2): one Kreate subscription per org, on one of the paid plans (plus any extra
+// team places), through Stripe Checkout with Managed
 // Payments (Stripe is the merchant of record: tax, fraud, disputes). Stripe is the source of truth:
 // every webhook re-reads the subscription from Stripe, so events arriving out of order can't leave
 // org_subscriptions stale. Only the server writes billing rows, with the service role.
@@ -35,7 +36,10 @@ export async function syncSubscription(event: H3Event, subscriptionId: string) {
   const subscription = await stripe.subscriptions.retrieve(subscriptionId)
   const orgId = await orgOf(db, subscription)
   if (!orgId) throw new Error(`No org for subscription ${subscriptionId}`)
-  const item = subscription.items.data[0]
+  // the plan's item (its price's lookup key names the plan) and the team member add-on's, if any
+  const items = subscription.items.data
+  const item = items.find(i => planForLookupKey(i.price.lookup_key)) ?? items[0]
+  const teamItem = items.find(i => i.price.lookup_key === TEAM_MEMBER.lookupKey)
   const seconds = (value: number | null | undefined) => value ? new Date(value * 1000).toISOString() : null
   const { error } = await db.from('org_subscriptions').upsert({
     org_id: orgId,
@@ -43,6 +47,8 @@ export async function syncSubscription(event: H3Event, subscriptionId: string) {
     stripe_subscription_id: subscription.id,
     status: subscription.status,
     price_id: item?.price.id ?? null,
+    plan: planForLookupKey(item?.price.lookup_key),
+    extra_team: teamItem?.quantity ?? 0,
     current_period_end: seconds(item?.current_period_end),
     trial_end: seconds(subscription.trial_end),
     cancel_at_period_end: subscription.cancel_at_period_end,
@@ -52,10 +58,36 @@ export async function syncSubscription(event: H3Event, subscriptionId: string) {
   if (error) throw error
 }
 
-/** The signed-in admin's org, for starting checkout or opening the portal. */
-export async function requireOrgAdmin(event: H3Event) {
+/** The org's Stripe customer, made the first time it's needed (one per org, reused for everything). */
+export async function ensureCustomer(event: H3Event, orgId: string) {
+  const db = serviceDb(event)
+  const [{ data: existing }, { data: org }] = await Promise.all([
+    db.from('org_subscriptions').select('*').eq('org_id', orgId).maybeSingle(),
+    db.from('orgs').select('name').eq('id', orgId).single()
+  ])
+  if (existing) return { customer: existing.stripe_customer_id, subscription: existing }
+  const user = await serverSupabaseUser(event)
+  const created = await stripeClient(event).customers.create(
+    { name: org?.name, email: user?.email, metadata: { org_id: orgId } },
+    { idempotencyKey: `org-customer-${orgId}` }
+  )
+  const { error } = await db.from('org_subscriptions').insert({ org_id: orgId, stripe_customer_id: created.id })
+  if (error) throw createError({ statusCode: 500, statusMessage: error.message })
+  return { customer: created.id, subscription: null }
+}
+
+/** A Stripe price by its lookup key. */
+export async function priceFor(event: H3Event, lookupKey: string) {
+  const prices = await stripeClient(event).prices.list({ lookup_keys: [lookupKey], active: true, limit: 1 })
+  const price = prices.data[0]
+  if (!price) throw createError({ statusCode: 503, statusMessage: `No active price with lookup key ${lookupKey}` })
+  return price
+}
+
+/** The signed-in owner's org, for starting checkout, opening the portal or buying team places. */
+export async function requireOrgOwner(event: H3Event) {
   const access = await requireMember(event)
-  if (!access.admin) throw createError({ statusCode: 403, statusMessage: 'Only an admin can manage billing' })
+  if (!access.owner) throw createError({ statusCode: 403, statusMessage: 'Only the owner can manage billing' })
   return access
 }
 

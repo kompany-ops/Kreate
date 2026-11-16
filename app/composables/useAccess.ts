@@ -7,8 +7,9 @@ interface Access {
 }
 
 /**
- * The signed-in user's membership of their current org (spec §3). No org means no access, unless
- * they can start one.
+ * The signed-in user's membership of their current org (spec §3): owner, team or cast. No org means
+ * no access, unless they can start one. `isAdmin` means on the team (the owner included): everything
+ * that once needed an admin now needs the team.
  */
 export const useAccess = () => {
   const { load } = useOrg()
@@ -36,7 +37,9 @@ export const useAccess = () => {
     checkedFor.value = null
   }
 
-  const isAdmin = computed(() => access.value?.role === 'admin')
+  const isAdmin = computed(() => isTeamRole(access.value?.role))
+  const isOwner = computed(() => access.value?.role === 'owner')
+  const isCast = computed(() => !!access.value && !isTeamRole(access.value.role))
 
-  return { access, isAdmin, ensure, reset }
+  return { access, isAdmin, isOwner, isCast, ensure, reset }
 }

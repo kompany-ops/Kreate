@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import type { PlanId } from '#shared/utils/plans'
+
 // Sign in (Google, or an email and password), or create an account: the plans first, then the
-// chosen plan's sign-up in a modal. The plans are a pricing preview (docs/spec.md §15): nothing is
-// charged here, and the plan picked is only noted on the account. An invite email's link
-// (?invite=<email>&org=<name>) opens on joining instead: no plans (members don't pay), the email filled in.
+// chosen plan's sign-up in a modal. Everyone starts on Free (docs/spec.md §2): nothing is charged
+// here, and the plan picked is only noted on the account (the owner chooses a paid plan in Settings). An invite email's link
+// (?invite=<email>&org=<name>) opens on joining instead: no plans (team and cast don't pay), the email filled in.
 definePageMeta({ layout: 'plain' })
 
 const route = useRoute()
@@ -19,47 +21,45 @@ function switchTo(next: 'sign-in' | 'sign-up' | 'reset') {
   else view.value = next === 'sign-up' ? 'plans' : next
 }
 
-const PLANS = [
-  {
-    title: 'Starter',
-    description: 'For getting started with a few brands.',
-    price: '$44.99',
-    features: ['Up to 5 brands', '2 seats', '2 shoots a month', 'Insights and diversity settings', 'Basic treatments', 'Klip available to buy']
-  },
-  {
-    title: 'Pro',
-    description: 'For creators and teams shooting every week.',
-    price: '$74.99',
-    badge: 'Most popular',
-    highlight: true,
-    scale: true,
-    features: ['Up to 10 brands', 'Unlimited seats', '6 shoots a month', 'Connect your AI', 'Insights and diversity settings', 'Moderate treatments', 'Klip available to buy']
-  },
-  {
-    title: 'Studio',
-    description: 'For running many brands at once.',
-    price: '$149.99',
-    features: ['Unlimited brands', 'Unlimited seats', 'Unlimited shoots', 'Connect your AI', 'Insights and diversity settings', 'Advanced treatments', 'Klip included']
-  }
-]
-
+/** each plan's features, from shared/utils/plans.ts */
+function features(id: PlanId) {
+  const { limits, treatments, klipIncluded } = PLANS[id]
+  const count = (value: number | null, one: string, many: string) => value === null ? `Unlimited ${many}` : `${value} ${value === 1 ? one : many}`
+  return [
+    count(limits.team, 'team member', 'team members'),
+    limits.cast === null ? 'Unlimited cast (always free)' : `${limits.cast} cast, always free`,
+    count(limits.channels, 'channel', 'channels'),
+    limits.brands === null ? 'Unlimited brands' : `${limits.brands} of your own ${limits.brands === 1 ? 'brand' : 'brands'}`,
+    limits.shootsPerMonth === null ? 'Unlimited shoots' : `${limits.shootsPerMonth} ${limits.shootsPerMonth === 1 ? 'shoot' : 'shoots'} a month`,
+    'Connect your AI',
+    `${treatments[0]!.toUpperCase()}${treatments.slice(1)} treatments`,
+    klipIncluded ? 'Klip included' : 'Klip available to buy'
+  ]
+}
 const signUpOpen = ref(false)
 const plan = ref<string>()
-const plans = computed(() => PLANS.map(({ title, ...rest }) => ({
-  title,
-  ...rest,
-  billingCycle: '/month',
-  terms: '30-day free trial',
-  button: {
-    label: 'Start free trial',
-    color: rest.highlight ? 'primary' as const : 'neutral' as const,
-    variant: rest.highlight ? 'solid' as const : 'subtle' as const,
-    onClick: () => {
-      plan.value = title
-      signUpOpen.value = true
+const plans = computed(() => PLAN_ORDER.map((id) => {
+  const { title, description, price, trial } = PLANS[id]
+  const highlight = id === 'pro'
+  return {
+    title,
+    description,
+    price: price ? `$${price}` : '$0',
+    ...(highlight ? { badge: 'Most popular', highlight, scale: true } : {}),
+    features: features(id),
+    billingCycle: '/month',
+    terms: trial ? '30-day free trial' : id === 'free' ? 'Free for as long as you like' : undefined,
+    button: {
+      label: id === 'free' ? 'Start free' : trial ? 'Start free trial' : `Start on ${title}`,
+      color: highlight ? 'primary' as const : 'neutral' as const,
+      variant: highlight ? 'solid' as const : 'subtle' as const,
+      onClick: () => {
+        plan.value = title
+        signUpOpen.value = true
+      }
     }
   }
-})))
+}))
 </script>
 
 <template>
@@ -77,7 +77,7 @@ const plans = computed(() => PLANS.map(({ title, ...rest }) => ({
             Choose your plan
           </h2>
           <p class="text-sm text-muted">
-            One subscription per organisation. Start with a 30-day free trial and cancel any time.
+            Start free, and choose a plan when you need more. Cast are always free.
           </p>
         </div>
       </div>
@@ -116,7 +116,7 @@ const plans = computed(() => PLANS.map(({ title, ...rest }) => ({
           variant="subtle"
           icon="i-lucide-shield-x"
           title="No access"
-          description="That account isn't in an organisation. Ask an admin to invite your email, then sign in again."
+          description="That account isn't in an organisation. Ask someone on its team to invite your email, then sign in again."
           class="text-left"
         />
 

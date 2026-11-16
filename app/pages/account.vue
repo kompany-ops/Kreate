@@ -68,7 +68,8 @@ function billing(org: MyOrg): { label: string, color: 'success' | 'info' | 'warn
       : { label: summary.current_period_end ? `Active · renews ${day(summary.current_period_end)}` : 'Active', color: 'success' }
     case 'past_due': return { label: 'Payment due', color: 'warning' }
   }
-  return org.entitled ? { label: 'Active', color: 'success' } : { label: 'Needs billing', color: 'error' }
+  // no live subscription: on Free
+  return { label: 'Free', color: 'neutral' }
 }
 
 /** an org at a glance: its team as faces, its shoots as a pipeline, and two big numbers */
@@ -105,7 +106,7 @@ function glance(org: MyOrg) {
   }
 }
 
-const klipLabel = { purchased: 'Klip', exempt: 'Klip', trial: 'Klip (trial)', none: '' } as const
+const klipLabel = { purchased: 'Klip', exempt: 'Klip', included: 'Klip', trial: 'Klip (trial)', none: '' } as const
 
 // --- profile ---------------------------------------------------------------
 const form = reactive({ name: '' })
@@ -240,7 +241,7 @@ async function signOut() {
                 {{ org.name }}
               </p>
               <p class="text-xs text-muted capitalize">
-                {{ org.role }}
+                {{ roleLabel(org.role) }}
               </p>
             </div>
             <!-- the one they were last in -->
@@ -260,7 +261,7 @@ async function signOut() {
           </div>
 
           <div v-if="glance(org)" class="w-full space-y-4 border-t border-default pt-3">
-            <!-- team: faces, admins first -->
+            <!-- team: faces, the owner and team first -->
             <div class="flex items-center gap-3">
               <div class="flex shrink-0 -space-x-2">
                 <UAvatar

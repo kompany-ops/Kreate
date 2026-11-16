@@ -37,7 +37,6 @@ export default defineNuxtConfig({
     // Billing (Stripe, Managed Payments); the webhook is <origin>/api/billing/webhook
     stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? '',
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
-    stripePriceLookupKey: process.env.STRIPE_PRICE_LOOKUP_KEY ?? 'top_dog_kit_monthly',
     stripeKlipPriceLookupKey: process.env.STRIPE_KLIP_PRICE_LOOKUP_KEY ?? 'ugc_klip',
     // Klip's license tokens (Phase 5): an Ed25519 private key, PKCS#8 DER in base64. Klip
     // holds the public key and checks tokens offline.

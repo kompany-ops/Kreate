@@ -11,7 +11,8 @@ type ShootRow = Row<'shoots'> & {
 
 const db = useDb()
 const run = useAction()
-const { products, productOptions, settings, load } = useRefData()
+const { people, products, productOptions, settings, load } = useRefData()
+const { access, isCast } = useAccess()
 
 const shoots = ref<ShootRow[]>([])
 const itemsByShoot = ref<Record<string, BundleItem[]>>({})
@@ -22,6 +23,11 @@ async function loadShoots() {
     .from('shoots')
     .select('*, product:products(id, name, brand:brands(id, name)), shoot_people(person:people(id, name)), shoot_channels(channel:channels(id, name))')
     .order('code', { ascending: false })) as unknown as ShootRow[]
+  // cast see the shoots they're in
+  if (isCast.value) {
+    const mine = new Set(people.value.filter(person => person.user_id === access.value?.id).map(person => person.id))
+    shoots.value = shoots.value.filter(shoot => shoot.shoot_people.some(row => mine.has(row.person.id)))
+  }
 
   // Items for the estimates, as the shoot page loads them (so the numbers match), fetched in
   // pages (the Data API returns at most 1,000 rows per request).
@@ -39,7 +45,8 @@ async function loadShoots() {
   // the Library's treatments that are on (combinations with their parts), as the shoot page loads them
   treatments.value = await loadTreatments(db)
 }
-await Promise.all([load(), loadShoots()])
+await load()
+await loadShoots()
 
 const calcSettings = computed(() => toCalcSettings(settings.value, DEFAULT_CALC_SETTINGS))
 
@@ -126,7 +133,7 @@ async function save() {
           <UDashboardSidebarCollapse />
         </template>
         <template #right>
-          <UButton icon="i-lucide-plus" label="New shoot" @click="create" />
+          <UButton v-if="!isCast" icon="i-lucide-plus" label="New shoot" @click="create" />
         </template>
       </UDashboardNavbar>
       <UDashboardToolbar>

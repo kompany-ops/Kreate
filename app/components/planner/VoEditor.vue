@@ -163,9 +163,9 @@ defineExpose({ edit })
 
 /** why this VO can't be saved by the signed-in user, if it can't */
 const blocked = computed(() => {
-  if (form.id) return canEditVo(form.person_id) ? null : `Only ${personName(form.person_id)} (who wrote it) or an admin can edit this VO.`
+  if (form.id) return canEditVo(form.person_id) ? null : `Only ${personName(form.person_id)} (who wrote it) or the team can edit this VO.`
   if (isAdmin.value) return props.people.length ? null : 'Add people to the shoot first.'
-  if (!me.value) return 'Your account isn\'t linked to anyone on the cast, so you can\'t write VOs. An admin can add you to a channel in Settings → Channels.'
+  if (!me.value) return 'Your account isn\'t linked to anyone on the cast, so you can\'t write VOs. Someone on the team can add you to a channel in Settings → Channels.'
   if (!props.people.some(person => person.id === me.value!.id)) return `You (${me.value.name}) aren't on this shoot. Add yourself in General to write VOs for it.`
   return null
 })
@@ -282,7 +282,7 @@ async function save() {
     <template #body>
       <div class="space-y-5">
         <UAlert v-if="blocked" color="warning" variant="subtle" icon="i-lucide-lock" :description="blocked" />
-        <UFormField v-else-if="choosesWriter" label="Written by" required help="As an admin you can write a VO for anyone on the shoot. Only they perform it.">
+        <UFormField v-else-if="choosesWriter" label="Written by" required help="As part of the team you can write a VO for anyone on the shoot. Only they perform it.">
           <USelectMenu v-model="form.person_id" :items="writerOptions" value-key="value" placeholder="Pick someone on the shoot" class="w-full" />
         </UFormField>
         <p v-else class="flex items-center gap-1.5 text-sm text-muted">

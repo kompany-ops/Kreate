@@ -6,7 +6,7 @@ begin;
 
 do $$
 declare
-  a_user uuid := (select m.user_id from public.org_members m join public.orgs o on o.id = m.org_id where o.slug = 'topdogugc' and m.role = 'admin' limit 1);
+  a_user uuid := (select m.user_id from public.org_members m join public.orgs o on o.id = m.org_id where o.slug = 'topdogugc' and m.role = 'owner' limit 1);
   a_org uuid := (select id from public.orgs where slug = 'topdogugc');
   b_user uuid := gen_random_uuid();
   b_org uuid;

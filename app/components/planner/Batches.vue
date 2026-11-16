@@ -44,7 +44,7 @@ const generating = ref(false)
 async function generate() {
   const status = await dropbox.refresh().catch(() => null)
   if (!status?.connected) {
-    toast.add({ title: 'Dropbox isn\'t connected', description: 'An admin can connect it in Settings → Dropbox.', color: 'warning', icon: 'i-lucide-cloud-off' })
+    toast.add({ title: 'Dropbox isn\'t connected', description: 'Someone on the team can connect it in Settings → Dropbox.', color: 'warning', icon: 'i-lucide-cloud-off' })
     return
   }
   generating.value = true

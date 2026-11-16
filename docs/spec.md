@@ -6,7 +6,7 @@ Kreate, by UGC Kompany: a web app for UGC teams and agencies, built first for th
 
 This spec covers the Library, Brands and Planner. Ingest, rendering and submissions are later projects. The schema is designed so they plug in without migrations of existing tables.
 
-*Last brought up to date: 2026-10-15, to match the app as built.*
+*Last brought up to date: 2026-11-15, to match the app as built.*
 
 ---
 
@@ -47,12 +47,26 @@ This spec covers the Library, Brands and Planner. Ingest, rendering and submissi
 
 ### Billing
 
-Kreate is **$54.99 USD a month per org**, the whole team included, with a **30-day free trial** the first time (card on file). Stripe Checkout with **Managed Payments**: Stripe is the merchant of record and handles sales tax, fraud, disputes and receipts.
-- **Billing** (Settings → Profile for admins; members see the status at `/billing`, which sends admins to Settings): **Start free trial** / **Subscribe** opens Checkout (`/api/billing/checkout`); **Manage billing** opens Stripe's Customer Portal (`/api/billing/portal`) for the payment method, invoices and cancelling. Members see the status.
-- **The webhook** (`/api/billing/webhook`, signed) re-reads the subscription from Stripe on every event, so events arriving out of order can't leave `org_subscriptions` stale. Only the server writes billing rows, with the service role.
-- **Entitlement**: an org can use the app while its subscription is trialing, active or past due (Stripe is retrying), or when it's billing-exempt (`orgs.billing_exempt`: topdogugc). Otherwise every page but billing redirects there (admins to Settings, members to `/billing`). A new org goes to billing first.
-- The price is found by lookup key (`top_dog_kit_monthly`), so the app holds no price ID. Env: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` (and optionally `STRIPE_PRICE_LOOKUP_KEY`).
-- **Klip** is **$189.99 USD once per org** (lookup key `ugc_klip`), bought in billing (`/api/billing/klip-checkout`: one-time Checkout, Managed Payments, needs a live Kreate). The webhook sets `orgs.klip_purchased_at` on `checkout.session.completed` / `async_payment_succeeded` (re-reading the session) and clears it on a full refund (`charge.refunded`). **Klip access** (`private.org_klip_access`): `purchased`, `exempt` (billing-exempt org), `trial` (Kreate trialing: ends with the trial) or `none`; `private.org_can_use_klip` = a live Kreate and access.
+Every org is on a **plan**: **Free** until the owner chooses **Starter**, **Pro** or **Studio** (`shared/utils/plans.ts`; the database has the same limits in `private.plan_limits`, and `tests/plans.test.ts` keeps them in step). Stripe Checkout with **Managed Payments**: Stripe is the merchant of record and handles sales tax, fraud, disputes and receipts.
+
+  | | Free | Starter | Pro | Studio |
+  |---|---|---|---|---|
+  | Price (USD a month) | $0 | $59.99 | $99.99 | $199.99 |
+  | Team (can plan; the owner included) | 1 | 1 | 2 | 3 |
+  | Cast (on camera; always free) | 1 | 2 | 6 | Unlimited |
+  | Channels | 1 | 1 | 3 | Unlimited |
+  | Own brands (not archived) | 1 | 5 | 10 | Unlimited |
+  | Shoots a month | 1 | 4 | 10 | Unlimited |
+  | Treatments | Basic | Basic | Moderate | Advanced (not enforced until treatments are tiered) |
+  | Klip | Buy | Buy | Buy | Included |
+
+- **Extra team places**: $29.99 a month each on a paid plan (lookup key `kreate_team_member`, a second item on the subscription; `org_subscriptions.extra_team`). The owner sets them in billing (`/api/billing/team-seats`, prorated), or is asked to buy one when adding a team member past the plan's places.
+- **Limits** count across the whole org, never per channel, and are enforced by the database (`private.check_plan_limit` on invites and role changes, channels, brands; `private.count_planned_shoot` on shoots), with messages that say what the plan includes and where to upgrade. A shoot counts when it's first marked Planned, in the month it happens (`shoots.plan_counted_at`, `private.org_shoot_counts`); deleting it or taking it back to draft doesn't give it back. After a downgrade nothing is removed: they just can't add more. Billing-exempt orgs (`orgs.billing_exempt`: topdogugc) are on Studio with no limits. `public.my_plan()` gives the current org's plan, limits and usage.
+- **Billing** (Settings → Profile for the team; cast see it at `/billing`): on Free, the owner picks a plan, which opens Checkout (`/api/billing/checkout`, `{ plan }`); Pro has a **30-day free trial** the first time (card on file). On a paid plan, **Change plan or manage billing** opens Stripe's Customer Portal (`/api/billing/portal`, configured with the three plan prices) for changing plan, the payment method, invoices and cancelling. Only the owner manages billing.
+- **The webhook** (`/api/billing/webhook`, signed) re-reads the subscription from Stripe on every event, so events arriving out of order can't leave `org_subscriptions` stale; it records the plan (from the base price's lookup key) and the extra team places. Only the server writes billing rows, with the service role.
+- **Everyone can use the app**: there's no billing wall (`private.org_is_entitled` is always true for an existing org), and anyone can start an org, on Free (`private.platform.org_signup_open`).
+- Prices are found by lookup key (`kreate_starter`, `kreate_pro`, `kreate_studio`, `kreate_team_member`; the old `top_dog_kit_monthly` counts as Pro), so the app holds no price ID. Env: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`.
+- **Klip** is **$189.99 USD once per org** on any plan, and included in Studio (lookup key `ugc_klip`), bought in billing by the owner (`/api/billing/klip-checkout`: one-time Checkout, Managed Payments). The webhook sets `orgs.klip_purchased_at` on `checkout.session.completed` / `async_payment_succeeded` (re-reading the session) and clears it on a full refund (`charge.refunded`). **Klip access** (`private.org_klip_access`): `purchased`, `exempt` (billing-exempt org), `included` (Studio), `trial` (Kreate trialing: ends with the trial) or `none`; `private.org_can_use_klip` = a live Kreate and access.
 - **Klip licenses**: Klip connects with a code, like PyCharm or the GitHub CLI, and never signs in to Supabase. It calls `/api/license/device/start` (returns `deviceCode`, a short `userCode` like `KQ7X-M2PD`, `verificationUriComplete` = `/klip/activate?code=…`, `expiresIn` 600, `interval` 5), opens the activation page, and polls `/api/license/device/poll` (`{ deviceCode }`) every `interval` seconds: `pending`, `slow_down`, `denied`, `expired`, or `approved` with `{ token, license }`, handed over once. On `/klip/activate` a signed-in member checks the code, picks the org and approves (`/api/license/device/approve`). Codes (`license_device_codes`, server only) last 10 minutes and are used once; only a hash of the device code is stored. Klip refreshes with `/api/license/refresh` (`{ token }`, up to 30 days after issue, membership re-checked); past that it connects again. **Sign Klip out everywhere** (admins, Settings → Profile → Klip; `public.sign_out_klip_everywhere()` sets `orgs.klip_signed_out_at`), like signing out of all devices: a licence issued before then isn't refreshed, so every computer connects again with a new code (one that's offline keeps its licence until it expires, 72 hours at most). `/api/license/issue` gives the signed-in Kreate member a token directly. The token is `<payload>.<signature>` (base64url), signed Ed25519; Klip checks it offline with the public key (`/api/license/public-key`). Payload: `v`, `orgId`, `orgName` (display only), `orgLogoUrl` (optional: the org's photo, a public https URL that changes when it's replaced; display only), `userId`, `subscriptionState` (`active`|`lapsed`), `klipPurchased` (has Klip access), `klipAccess`, `trialEndsAt`, `issuedAt`, `expiresAt` (ms since epoch; 72 hours offline, capped at the trial's end when Klip comes from the trial). Klip opens only when `subscriptionState` is `active` and `klipPurchased`. Env: `LICENSE_PRIVATE_KEY` (PKCS#8 DER, base64).
 
 ### Design tokens
@@ -71,13 +85,15 @@ SUPABASE_SERVICE_ROLE_KEY=      # server routes only; not required today
 
 ## 3. Users and access
 
-- **Orgs**, like Shopify: an org owns everything in the app (`org_id` on every table) and pays; its admins invite members by email, and members don't pay. Names, slugs and codes are unique within an org, and each org counts its own shoots (S001…).
+- **Orgs** (accounts), like Shopify: an org owns everything in the app (`org_id` on every table). Its **owner** pays; the team invites people by email, and only the owner adds team members, who can cost extra (§2, Billing). Cast don't pay. Names, slugs and codes are unique within an org, and each org counts its own shoots (S001…).
 - Sign in with Google, or an email and password (`/login`: sign in, create an account, or reset a forgotten password by email at `/reset-password`). A new email account confirms its address by the emailed link. Not in an org → signed out with a "no access" message. (Starting a new org at `/onboarding` is closed until billing exists: `private.platform.org_signup_open`.)
-- **Invites** (`org_invites`): Settings → Members. Inviting someone emails them (`/api/invites/send`, Resend, from `Kreate <hello@kreate.ugckompany.com>`, Reply-To the admin who sent it; `org_invites.emailed_at`), and **Resend invite** sends it again. Its button opens `/login?invite=<email>&org=<name>`: joining, with no plans (members don't pay), the email filled in, creating an account or signing in. Env: `RESEND_API_KEY`. An invite becomes a membership (`org_members`) when someone signs in with that email, or straight away if they already have, but only once the account's email is **confirmed** (`auth.users.email_confirmed_at`): Google accounts always are, email accounts once they've opened the confirmation link. Confirming later accepts the invites then.
+- **Invites** (`org_invites`): Settings → Team and cast. Inviting someone emails them (`/api/invites/send`, Resend, from `Kreate <hello@kreate.ugckompany.com>`, Reply-To whoever sent it; `org_invites.emailed_at`), and **Resend invite** sends it again. Its button opens `/login?invite=<email>&org=<name>`: joining, with no plans (team and cast don't pay), the email filled in, creating an account or signing in. Env: `RESEND_API_KEY`. An invite becomes a membership (`org_members`) when someone signs in with that email, or straight away if they already have, but only once the account's email is **confirmed** (`auth.users.email_confirmed_at`): Google accounts always are, email accounts once they've opened the confirmation link. Confirming later accepts the invites then.
 - **The current org**: `private.current_org_id()` is the `org_id` claim in the access token (`public.custom_access_token_hook`, optional, turned on in the Supabase dashboard), else the org the user last switched to (`profiles.active_org_id`), else their first; always one they're a member of right now. Someone in several orgs picks one in Your account (`/account`; `/orgs` redirects there) and switches from the top bar. Inserts default to it, so app queries don't mention orgs.
-- Two roles, per org:
-  - **admin** — everything, plus managing people, channels, members and settings. Only admins move a shoot through its statuses (planning it, starting and ending filming, editing, going Live), renumber it, mark it stale and run its batches (making them, moving them on, scoring, dropping elements). The database enforces it.
-  - **member** — full read/write on the Library, Brands and planning a shoot. Once an admin has started a shoot, members tick off their shots and add their clips; before that the checklist is read-only for them. They can see batches but not change them.
+- Three roles, per org (`org_members.role`; an invite is for team or cast):
+  - **owner** — one per org (`org_members_one_owner`): the team's rights, plus billing and adding or removing team members. Nobody can be made owner or remove the owner through the app (`private.guard_roles`). A new org's creator is its owner.
+  - **team** — plans and runs the account: the Library, Brands, planning shoots, and everything that once needed an admin (moving a shoot through its statuses, renumbering, marking it stale, running batches, settings, channels, inviting cast). `private.is_org_admin` means "on the team" (owner or team). The database enforces it.
+  - **cast** — on camera, free. They see the org but write only what filming needs: ticking off their own shots (status and take notes: `private.guard_cast_shot_edits`), ticking off b-roll (`private.guard_cast_broll_edits`), their own clips, and chat. Their sidebar shows only Shoots (the ones they're in) and Chat, and the Library, Brands and Settings send them to their shoots. Hiding data from cast at the database level comes with brand and agency accounts.
+  - Existing admins and members became team (`20261120000000_team_and_cast.sql`); each org's creator, or its earliest admin, became its owner.
 - Enforce with RLS: every org-owned table is readable and writable only in the request's current org, so someone in two orgs never sees them mixed; admin-only tables are writable by that org's admins only. Foreign keys include `org_id`, so a row can only point at rows in its own org, and a person can only be linked to a member of theirs. `supabase/tests/org_isolation.sql` checks orgs can't reach each other.
 - `profiles` mirrors each auth user's name and email so the app can show who created or changed things; only people sharing your current org are visible.
 
@@ -100,7 +116,7 @@ Below the bar, an organisation's pages have its sidebar; opening an organisation
 | **Library** | Hooks (scripts and types), CTAs, **Formats** (VOs are written in shoots) |
 | **Planner** | Shoots list → shoot planner (with calculator) → checklist → exports |
 | **Brands** | Brands (Trybe deal data, CSV import, filters), products with slot values, brand → channel assignment |
-| **Settings** (admin) | Channels and who's on them, members, defaults (time per item, speech pace, general product shots) |
+| **Settings** (team) | Channels and who's on them, team and cast, billing, defaults (time per item, speech pace, general product shots) |
 
 UI conventions: every destructive or state-changing action asks in an in-app confirm dialog (never a browser alert); collapsible sections start collapsed; long lists paginate and show a spinner while loading; each Library tab has a `?` help popover.
 
@@ -157,7 +173,7 @@ All tables get `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at
 **people** — on-camera talent
 - `name text`, `slug text unique` (lowercase kebab, used in folder names), `active boolean`
 - `user_id` — optional link to a member's account; that member's checklist shows their own shots. A person belongs to one org: someone in two orgs is a separate person in each
-- Everyone on camera has a login. A person isn't managed directly: adding a member to a channel (Settings → Channels) makes their record, named from their display name. Their slug never changes, renaming them in Members renames the person, and taking them off their last channel makes them inactive (they can't join new shoots; past shoots keep them). An invited email can be added to channels too, and joins them on first sign-in (`org_invites.channel_ids`).
+- Everyone on camera has a login. A person isn't managed directly: adding a member to a channel (Settings → Channels) makes their record, named from their display name. Their slug never changes, renaming them in Team and cast renames the person, and taking them off their last channel makes them inactive (they can't join new shoots; past shoots keep them). An invited email can be added to channels too, and joins them on first sign-in (`org_invites.channel_ids`).
 
 **person_channels** — `person_id`, `channel_id`, pk on both. People linked to a channel; recipes on that channel can mix their parts (§9).
 
@@ -689,21 +705,6 @@ Motion's pet data gives **Text message** the highest spend use ratio of any form
 - No hard deletes on library or shoot data; archive instead. (Removing items from a draft shoot is allowed.)
 
 ## 15. Out of scope (later projects)
-
-- **Subscription tiers** (planned MVP improvement, not built). Organisations stay the billing unit; limits are per organisation:
-
-  | | Starter | Pro | Studio |
-  |---|---|---|---|
-  | Price (USD a month) | $44.99 | $74.99 | $149.99 |
-  | Seats (org members and pending invites; cast aren't seats) | 2 | Unlimited | Unlimited |
-  | Brands | 5 | 10 | Unlimited |
-  | Shoots per month | 2 | 6 | Unlimited |
-  | AI connector (§11) | – | ✓ | ✓ |
-  | Insights and diversity settings | ✓ | ✓ | ✓ |
-  | Treatments | Basic | Moderate | Advanced (not enforced until treatments are built) |
-  | Klip | Buy | Buy | Included |
-
-  The free trial is on Pro. A shoot counts when it's marked Planned, in the calendar month it happens; deleting it doesn't give it back. Over a limit after a downgrade, nothing is removed: they just can't add more. Billing-exempt orgs (set by SQL only: `update public.orgs set billing_exempt = true where slug = '…'`) get Studio limits.
 
 - Local worker (Windows now, VPS later): ingest, auto-tagging, conformance checks, caption alignment, recipe generation, selection, rendering.
 - Submission queue and form-filling Chrome extension (linked to Dropbox).

@@ -6,7 +6,7 @@ import { serverSupabaseUser } from '#supabase/server'
 // (confirmed) turns the invite into a membership, as before.
 export default defineEventHandler(async (event) => {
   const { db, admin, orgId } = await requireMember(event)
-  if (!admin) throw createError({ statusCode: 403, statusMessage: 'Only an admin can invite people' })
+  if (!admin) throw createError({ statusCode: 403, statusMessage: 'Only the team can invite people' })
 
   const body = await readBody<{ email?: string }>(event)
   const email = String(body?.email ?? '').trim().toLowerCase()

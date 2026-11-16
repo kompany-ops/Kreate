@@ -1,5 +1,5 @@
 -- Channels hold their members: adding one makes their person record, taking someone off their last
--- channel makes them inactive, only admins can do it, and invites carry channels through to sign-in.
+-- channel makes them inactive, only the team can do it, and invites carry channels through to sign-in.
 -- Raises on the first failure, and rolls everything back either way.
 -- Run it in the Supabase SQL editor, or with psql against the project.
 
@@ -8,8 +8,8 @@ begin;
 do $$
 declare
   org uuid := (select id from public.orgs where slug = 'topdogugc');
-  admin_user uuid := (select user_id from public.org_members where org_id = (select id from public.orgs where slug = 'topdogugc') and role = 'admin' limit 1);
-  member_user uuid := (select user_id from public.org_members where org_id = (select id from public.orgs where slug = 'topdogugc') and role = 'member' limit 1);
+  admin_user uuid := (select user_id from public.org_members where org_id = (select id from public.orgs where slug = 'topdogugc') and role = 'owner' limit 1);
+  member_user uuid := (select user_id from public.org_members where org_id = (select id from public.orgs where slug = 'topdogugc') and role = 'team' limit 1);
   a_channel uuid := (select id from public.channels where org_id = (select id from public.orgs where slug = 'topdogugc') order by name limit 1);
   before_ids uuid[];
   invited uuid := gen_random_uuid();
@@ -18,6 +18,8 @@ declare
   be_admin text := json_build_object('sub', admin_user, 'role', 'authenticated')::text;
   be_member text := json_build_object('sub', member_user, 'role', 'authenticated')::text;
 begin
+  -- the "member" here is cast: on camera, not planning
+  update public.org_members set role = 'cast' where org_id = org and user_id = member_user;
   select coalesce(array_agg(p.user_id), '{}') into before_ids
   from public.person_channels pc join public.people p on p.id = pc.person_id
   where pc.channel_id = a_channel and p.user_id is not null;
@@ -25,7 +27,7 @@ begin
   -- a fresh member with no person record yet
   insert into auth.users (id, email, aud, role, raw_app_meta_data)
   values (invited, 'channel-test@example.com', 'authenticated', 'authenticated', '{"providers":["google"]}');
-  insert into public.org_members (org_id, user_id, role, display_name) values (org, invited, 'member', 'Test Person');
+  insert into public.org_members (org_id, user_id, role, display_name) values (org, invited, 'cast', 'Test Person');
 
   perform set_config('role', 'authenticated', true);
 
@@ -75,11 +77,12 @@ begin
   end if;
 
   -- an invite carries its channels through to sign-in
-  insert into public.org_invites (email, role, display_name, channel_ids) values ('channel-invite@example.com', 'member', 'Invite Person', array[a_channel]);
+  insert into public.org_invites (email, role, display_name, channel_ids) values ('channel-invite@example.com', 'cast', 'Invite Person', array[a_channel]);
   perform set_config('role', 'postgres', true);
   invited := gen_random_uuid();
-  insert into auth.users (id, email, aud, role, raw_app_meta_data)
-  values (invited, 'channel-invite@example.com', 'authenticated', 'authenticated', '{"providers":["google"]}');
+  -- invites apply once the email is confirmed
+  insert into auth.users (id, email, aud, role, raw_app_meta_data, email_confirmed_at)
+  values (invited, 'channel-invite@example.com', 'authenticated', 'authenticated', '{"providers":["google"]}', now());
   if not exists (
     select 1 from public.person_channels pc join public.people p on p.id = pc.person_id
     where p.user_id = invited and pc.channel_id = a_channel

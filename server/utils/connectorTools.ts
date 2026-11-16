@@ -24,7 +24,7 @@ Write lines the way a real creator talks to camera: first person, plain spoken w
 
 What you add (add_hooks, add_ctas) goes into the Library tagged "${DRAFT_TAG}" for a person to review in Kreate, and the organisation's chat gets a note that you added it.
 
-You can plan shoots end to end like a person in Kreate: change a shoot's setup, people, channels, formats and custom slots (update_shoot), put hooks, VOs and CTAs on its shot list or take them off (add_to_shot_list, remove_from_shot_list), change their wording and locations (edit_shot_list), write and change VOs (add_vo, update_vo), build its b-roll list (add_broll, update_broll, remove_broll) and move it to planned (set_shoot_status, admins). get_shoot shows everything, including what still stops a draft being planned. Ask before removing things or changing status. You can also search the Library (search_library), draft a shoot (draft_shoot) add and change brands (add_brand, update_brand: everything on the brand page, including how it pays us, its star and archiving) and add products and product features (add_product, add_features). VOs and shoots you make are drafts a person reviews in Kreate.
+You can plan shoots end to end like a person in Kreate: change a shoot's setup, people, channels, formats and custom slots (update_shoot), put hooks, VOs and CTAs on its shot list or take them off (add_to_shot_list, remove_from_shot_list), change their wording and locations (edit_shot_list), write and change VOs (add_vo, update_vo), build its b-roll list (add_broll, update_broll, remove_broll) and move it to planned (set_shoot_status, the team only). get_shoot shows everything, including what still stops a draft being planned. Ask before removing things or changing status. You can also search the Library (search_library), draft a shoot (draft_shoot) add and change brands (add_brand, update_brand: everything on the brand page, including how it pays us, its star and archiving) and add products and product features (add_product, add_features). VOs and shoots you make are drafts a person reviews in Kreate.
 
 Everything has its own link (the \`link\` field): give it to the person whenever you mention or make something, and use share_to_chat to post an item to the chat as a card.
 
@@ -81,7 +81,7 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
     } else {
       throw new Error(`Which organisation? This AI app can use ${names}. Pass one as \`organisation\`.`)
     }
-    if (!org!.entitled) throw new Error(`${org!.name}'s Kreate subscription isn't active, so the AI connector is off there. An admin can restart it in Settings → Profile.`)
+    if (!org!.entitled) throw new Error(`${org!.name}'s Kreate subscription isn't active, so the AI connector is off there. The owner can restart it in Settings → Profile.`)
     return org!
   }
 
@@ -393,11 +393,11 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
       ? onShootPeople.find(entry => entry.name.toLowerCase() === writer.trim().toLowerCase())
       : onShootPeople.find(entry => entry.user_id === claims?.claims.sub)
     if (writer?.trim() && !person) return failure(`${writer} isn't on ${shoot.code}. People on it: ${onShootPeople.map(entry => entry.name).join(', ') || 'none yet'}.`)
-    // a VO is written by its writer: only an admin drafts one for someone else (or with no writer yet)
-    if (org.role !== 'admin' && person?.user_id !== claims?.claims.sub) {
+    // a VO is written by its writer: only the team drafts one for someone else (or with no writer yet)
+    if (!isTeamRole(org.role) && person?.user_id !== claims?.claims.sub) {
       return failure(person
-        ? `Only an admin can write a VO for ${person.name}. Write it as the person you work for, or ask an admin.`
-        : `The person you work for isn't on ${shoot.code}'s cast, so they can't write a VO on it. An admin can add them to the shoot (or write it).`)
+        ? `Only the team can write a VO for ${person.name}. Write it as the person you work for, or ask someone on the team.`
+        : `The person you work for isn't on ${shoot.code}'s cast, so they can't write a VO on it. Someone on the team can add them to the shoot (or write it).`)
     }
     const featureRow = feature?.trim()
       ? must(await db.from('product_features').select('id').eq('product_id', shoot.product_id).ilike('name', feature.trim()).maybeSingle())

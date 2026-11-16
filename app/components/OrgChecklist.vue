@@ -18,7 +18,7 @@ function toggle(id: string) {
         <UCheckbox :model-value="model.includes(org.id)" @update:model-value="toggle(org.id)" />
         <UAvatar :src="org.logo_url ?? undefined" :alt="org.name" size="sm" />
         <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">{{ org.name }}</span>
-        <span class="text-xs text-muted capitalize">{{ org.role }}</span>
+        <span class="text-xs text-muted">{{ roleLabel(org.role) }}</span>
       </label>
     </li>
   </ul>

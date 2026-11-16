@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Starting a new org: for someone who isn't in one (the access gate sends them here while new orgs
-// are open), or from the organisation menu. Members join through an admin's invite. What it does
+// are open), or from the organisation menu. Team and cast join through an invite. What it does
 // becomes its profile: its voice, given to its own AI when connected (changeable in Settings → Scripts).
 definePageMeta({ layout: 'plain' })
 
@@ -45,7 +45,7 @@ async function signOut() {
           Start your organisation
         </h1>
         <p class="text-sm text-muted">
-          You'll be its admin, and can invite your team. If your team is already here, ask an admin to invite you instead.
+          You'll be its owner, on Free until you choose a plan, and can invite your team and cast. If your team is already here, ask them to invite you instead.
         </p>
       </div>
       <UFormField label="Organisation name" required>

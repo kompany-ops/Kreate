@@ -49,7 +49,7 @@ async function loadShoot(db: ConnectorDb, code: string): Promise<LoadedShoot> {
 function requireDraft(bundle: LoadedShoot, what: string) {
   if (bundle.shoot.status === 'draft') return
   throw new Error(`${bundle.shoot.code} is ${STATUS_WORDS[bundle.shoot.status] ?? bundle.shoot.status}, so ${what} can't change. `
-    + (bundle.shoot.status === 'planned' ? 'An admin can move it back to draft first (set_shoot_status draft).' : 'Its plan is frozen.'))
+    + (bundle.shoot.status === 'planned' ? 'Someone on the team can move it back to draft first (set_shoot_status draft).' : 'Its plan is frozen.'))
 }
 function requireNotLive(bundle: LoadedShoot) {
   if (bundle.shoot.status === 'edited') throw new Error(`${bundle.shoot.code} is live: its recipes are built from the edited clips, so nothing on it can change.`)
@@ -473,7 +473,7 @@ export function registerShootTools(kit: ShootToolKit) {
   // --- VOs ------------------------------------------------------------------------------------------
   server.registerTool('update_vo', {
     title: 'Update VO',
-    description: 'Change a VO on a shoot: its beats (with alternate wordings), title, feature, notes, source link and cast (other people on the shoot who perform it too, on one channel they share with its writer), and put it on the shot list. Only its writer or an admin can. A VO on the shot list of a draft keeps its lines in step.',
+    description: 'Change a VO on a shoot: its beats (with alternate wordings), title, feature, notes, source link and cast (other people on the shoot who perform it too, on one channel they share with its writer), and put it on the shot list. Only its writer or the team can. A VO on the shot list of a draft keeps its lines in step.',
     inputSchema: z.object({
       shoot: shootArg,
       vo: z.string().min(2).max(60).describe('The VO\'s code on the shot list (e.g. V02) or its id (from add_vo)'),
@@ -723,11 +723,11 @@ export function registerShootTools(kit: ShootToolKit) {
   // --- status ---------------------------------------------------------------------------------------
   server.registerTool('set_shoot_status', {
     title: 'Set shoot status',
-    description: 'Move a shoot along (admins only): "planned" freezes a ready draft\'s scripts (get_shoot\'s to_plan must be empty); "draft" takes a planned shoot (not yet started) back to editing; "stale" archives a shoot from the shoots list, "not_stale" brings it back. Filming, uploads, editing and going live happen in Kreate and Klip. Confirm with the person first.',
+    description: 'Move a shoot along (the team only): "planned" freezes a ready draft\'s scripts (get_shoot\'s to_plan must be empty); "draft" takes a planned shoot (not yet started) back to editing; "stale" archives a shoot from the shoots list, "not_stale" brings it back. Filming, uploads, editing and going live happen in Kreate and Klip. Confirm with the person first.',
     inputSchema: z.object({ shoot: shootArg, status: z.enum(['planned', 'draft', 'stale', 'not_stale']), organisation: organisationArg }),
     annotations: { readOnlyHint: false, destructiveHint: false }
   }, guarded(async ({ shoot: code, status }: { shoot: string, status: 'planned' | 'draft' | 'stale' | 'not_stale', organisation?: string }, org, db) => {
-    if (org.role !== 'admin') return failure('Only an admin can change a shoot\'s status.')
+    if (!isTeamRole(org.role)) return failure('Only the team can change a shoot\'s status.')
     const bundle = await loadShoot(db, code)
     const { shoot } = bundle
     if (status === 'planned') {

@@ -142,7 +142,7 @@ async function save() {
         </template>
         <p v-else class="text-sm text-muted">
           {{ channelsMissing(slot.name).map(channel => channel.name).join(', ') }} {{ channelsMissing(slot.name).length === 1 ? 'has' : 'have' }} no value for it yet.
-          An admin can add it in Settings → Channels.
+          Someone on the team can add it in Settings → Channels.
         </p>
       </template>
 

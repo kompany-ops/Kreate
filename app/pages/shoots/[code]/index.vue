@@ -517,7 +517,7 @@ const buildingTree = ref(false)
 async function createDropboxFolders(quiet = false) {
   const status = await dropbox.ensure()
   if (!status?.connected) {
-    if (!quiet) toast.add({ title: 'Dropbox isn\'t connected', description: 'An admin can connect it in Settings → Dropbox.', color: 'warning', icon: 'i-lucide-cloud-off' })
+    if (!quiet) toast.add({ title: 'Dropbox isn\'t connected', description: 'Someone on the team can connect it in Settings → Dropbox.', color: 'warning', icon: 'i-lucide-cloud-off' })
     return
   }
   buildingTree.value = true

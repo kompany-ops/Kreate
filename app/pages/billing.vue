@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Billing lives in Settings → Profile for admins; this page is for everyone else (where things
-// stand, and who to ask), and sends admins there, keeping Stripe's ?checkout / ?klip on the way.
+// Billing lives in Settings → Profile for the team; this page is for cast (where things
+// stand, and who to ask), and sends the team there, keeping Stripe's ?checkout / ?klip on the way.
 const route = useRoute()
 const { isAdmin } = useAccess()
 if (isAdmin.value) await navigateTo({ path: '/settings', query: { ...route.query, tab: 'profile' } }, { replace: true })

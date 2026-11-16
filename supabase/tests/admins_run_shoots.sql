@@ -1,5 +1,5 @@
--- Only admins change a shoot's status or run its batches, and members can't film before an admin
--- starts the shoot. Raises on the first failure, and rolls everything back either way.
+-- Only the team ("admins" here) changes a shoot's status or runs its batches, and cast ("members")
+-- can't film before the team starts the shoot. Raises on the first failure, and rolls everything back either way.
 -- Run it in the Supabase SQL editor, or with psql against the project.
 
 begin;
@@ -7,8 +7,8 @@ begin;
 do $$
 declare
   org uuid := (select id from public.orgs where slug = 'topdogugc');
-  admin_user uuid := (select user_id from public.org_members where org_id = (select id from public.orgs where slug = 'topdogugc') and role = 'admin' limit 1);
-  member_user uuid := (select user_id from public.org_members where org_id = (select id from public.orgs where slug = 'topdogugc') and role = 'member' limit 1);
+  admin_user uuid := (select user_id from public.org_members where org_id = (select id from public.orgs where slug = 'topdogugc') and role = 'owner' limit 1);
+  member_user uuid := (select user_id from public.org_members where org_id = (select id from public.orgs where slug = 'topdogugc') and role = 'team' limit 1);
   a_shoot uuid := (select id from public.shoots where org_id = (select id from public.orgs where slug = 'topdogugc') order by code desc limit 1);
   a_item uuid;
   a_shot uuid;
@@ -19,17 +19,23 @@ begin
   if a_shoot is null or member_user is null then
     raise exception 'Needs a shoot and a member to test with';
   end if;
+  -- the "member" here is cast: on camera, not planning
+  update public.org_members set role = 'cast' where org_id = org and user_id = member_user;
   update public.shoots set status = 'planned' where id = a_shoot;
-  select id into a_item from public.shoot_items where shoot_id = a_shoot limit 1;
+  -- cast tick off their own shots
+  select i.id into a_item from public.shoot_items i join public.people p on p.id = i.person_id
+  where i.shoot_id = a_shoot and p.user_id = member_user limit 1;
   select id into a_shot from public.broll_shots where shoot_id = a_shoot limit 1;
 
   perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims', be_member, true);
 
   -- a member can't start the shoot, or any other status change
+  -- cast can't write shoots at all (no rows), and the status guard stops anyone else
   begin
     update public.shoots set status = 'shooting' where id = a_shoot;
-    raise exception 'FAILED: a member started a shoot';
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAILED: a member started a shoot'; end if;
   exception when raise_exception then
     if sqlerrm like 'FAILED%' then raise; end if;
   end;
@@ -42,9 +48,11 @@ begin
   end if;
 
   -- or mark it stale, or renumber it
+  -- cast can't write shoots at all (no rows), and the status guard stops anyone else
   begin
     update public.shoots set stale_at = now() where id = a_shoot;
-    raise exception 'FAILED: a member marked a shoot stale';
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAILED: a member marked a shoot stale'; end if;
   exception when raise_exception then
     if sqlerrm like 'FAILED%' then raise; end if;
   end;
@@ -113,6 +121,13 @@ begin
     update public.shoot_items set status = 'filmed' where id = a_item;
     get diagnostics n = row_count;
     if n <> 1 then raise exception 'FAILED: a member couldn''t film a started shoot'; end if;
+    -- a tick, and nothing else about the shot
+    begin
+      update public.shoot_items set location = 'moved by cast' where id = a_item;
+      raise exception 'FAILED: cast changed more than a tick';
+    exception when raise_exception then
+      if sqlerrm like 'FAILED%' then raise; end if;
+    end;
   end if;
   if a_shot is not null then
     update public.broll_shots set clips_filmed = clips_filmed + 1 where id = a_shot;

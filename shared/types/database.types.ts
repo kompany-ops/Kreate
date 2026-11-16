@@ -1097,7 +1097,9 @@ export type Database = {
           cancel_at_period_end: boolean
           created_at: string
           current_period_end: string | null
+          extra_team: number
           org_id: string
+          plan: string | null
           price_id: string | null
           status: string | null
           stripe_customer_id: string
@@ -1111,7 +1113,9 @@ export type Database = {
           cancel_at_period_end?: boolean
           created_at?: string
           current_period_end?: string | null
+          extra_team?: number
           org_id: string
+          plan?: string | null
           price_id?: string | null
           status?: string | null
           stripe_customer_id: string
@@ -1125,7 +1129,9 @@ export type Database = {
           cancel_at_period_end?: boolean
           created_at?: string
           current_period_end?: string | null
+          extra_team?: number
           org_id?: string
+          plan?: string | null
           price_id?: string | null
           status?: string | null
           stripe_customer_id?: string
@@ -2037,6 +2043,7 @@ export type Database = {
           location_notes: string | null
           notes: string | null
           org_id: string
+          plan_counted_at: string | null
           product_id: string
           reverted_at: string | null
           runway_target: number
@@ -2068,6 +2075,7 @@ export type Database = {
           location_notes?: string | null
           notes?: string | null
           org_id?: string
+          plan_counted_at?: string | null
           product_id: string
           reverted_at?: string | null
           runway_target?: number
@@ -2099,6 +2107,7 @@ export type Database = {
           location_notes?: string | null
           notes?: string | null
           org_id?: string
+          plan_counted_at?: string | null
           product_id?: string
           reverted_at?: string | null
           runway_target?: number
@@ -2405,6 +2414,24 @@ export type Database = {
           name: string
           role: string
           slug: string
+        }[]
+      }
+      my_plan: {
+        Args: never
+        Returns: {
+          billing_exempt: boolean
+          brands_limit: number
+          brands_used: number
+          cast_limit: number
+          cast_used: number
+          channels_limit: number
+          channels_used: number
+          extra_team: number
+          plan: string
+          shoots_limit: number
+          shoots_used: number
+          team_limit: number
+          team_used: number
         }[]
       }
       org_license_state: {
