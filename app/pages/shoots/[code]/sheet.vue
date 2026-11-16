@@ -2,6 +2,7 @@
 import type { BrollShot } from '#shared/utils/loadShoot'
 import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { BundleItem, ShotGroup } from '#shared/utils/shootsheet'
+import { brollChannelIds } from '#shared/utils/shootsheet'
 import type { Row } from '#shared/types/models'
 
 // On-set shot sheet (spec §10a): phone-first, big tap targets, saves on every tap.
