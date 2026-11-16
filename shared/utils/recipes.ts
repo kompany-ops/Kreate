@@ -24,17 +24,30 @@
 // treatment that applies to it, alongside the untreated one (one treatment per version). A layout
 // treatment (face to camera, over b-roll) re-lays the VO's beats (and a standalone VO's own hook
 // and CTA) and is skipped where it changes nothing or the b-roll can't cover it; Library hooks
-// and CTAs keep their own mode. Other treatments apply when the recipe has what they need: text
-// (the editor writes it), the speaker's video (every take filmed), the shoot's {{offer}}; old
-// footage isn't tracked yet. Klip makes each treatment's content as a treated copy (a
-// sidecar) beside every clip it applies to; a treated version plays those copies instead, and isn't
-// made when one's missing. Layouts need no sidecar: they only choose which footage plays.
+// and CTAs keep their own mode. Other treatments apply when the recipe has what they need: the
+// speaker's video (every take filmed), the shoot's {{offer}}, and the ingredients Klip makes for
+// the treatment's component (a cut-out, retro captions, a search query, placed text) on every take
+// the treatment covers (docs/contract.md §5). A treated version keeps the untreated version's files:
+// the renderer composes the treatment from the takes' blocks. Only treatments the renderer can draw
+// get versions.
 //
 // Paths are relative to the shoot's edited/ folder.
 
 import type { BrollClip, Manifest, TakeClip } from './manifest'
 import type { BeatShow } from './shootsheet'
+import type { TakeBlocks, TakeRole, TakeText } from './klip'
+import { hasIngredient, isDrawable, treatmentIngredients } from './klip'
 import { slugify } from './slots'
+
+/**
+ * recipes.json's version.
+ * 3: each take (hook, cta, every beat) carries `blocks` (its captions, and what the shoot's
+ * treatments need: `cutout`, `captions-retro`) and `klip_text` (a search query, placed text),
+ * replacing `hook.caption`, `cta.caption` and `vo_captions`; a treated version keeps the untreated
+ * version's files, and its `treatment` drops `sidecar` and `applies_to` (docs/contract.md §7).
+ * 2: treated versions, with files swapped for Klip's treated copies.
+ */
+export const RECIPES_SCHEMA_VERSION = 3
 
 export interface RecipeBeat {
   beat: string
@@ -44,8 +57,12 @@ export interface RecipeBeat {
   person: string
   /** the speaker on camera (face), their voice over b-roll (broll), a voice-note bubble (voice_note) or a message on screen (screen) */
   show: BeatShow
-  /** the VO recording for this beat ('' for a beat shown on screen: it isn't filmed) */
+  /** the VO recording for this beat: its clip ('' for a beat shown on screen: it isn't filmed) */
   vo: string
+  /** the beat's other blocks in edited/: captions, and what the shoot's treatments need (null: not filmed) */
+  blocks: TakeBlocks | null
+  /** text Klip wrote for treatments (null: none) */
+  klip_text: TakeText | null
   /** a beat shown on screen: its message */
   text: string | null
   duration: number
@@ -67,14 +84,12 @@ export interface Recipe {
    * The opening. A standalone VO's is its hook beat (`take` says which wording), shown face or over
    * b-roll; a Library hook is always on camera.
    */
-  hook: { code: string, person: string, item_id: string, take: string | null, file: string, caption: string | null, duration: number, hook_type: string | null, show: BeatShow, broll: string[], text: string | null }
+  hook: { code: string, person: string, item_id: string, take: string | null, file: string, blocks: TakeBlocks | null, klip_text: TakeText | null, duration: number, hook_type: string | null, show: BeatShow, broll: string[], text: string | null }
   /** item_id: the VO's item (a mixed VO's items joined with +); item_ids: each one. A standalone VO's beats are its middle ones. */
   vo: { code: string, item_id: string, item_ids: string[], format: string | null, beats: RecipeBeat[] }
   /** The close. A standalone VO's is its CTA beat (mode sync when shown face, vo over b-roll, or screen / voice_note). */
-  cta: { code: string, person: string, item_id: string, take: string | null, mode: string | null, file: string, caption: string | null, duration: number, broll: string[], text: string | null }
-  /** the VO beats' captions, in order (each beat's SRT, offset by the running length when stitched) */
-  vo_captions: (string | null)[]
-  /** the treatment this version carries (null = untreated): its files are Klip's treated copies, Showdog stitches them */
+  cta: { code: string, person: string, item_id: string, take: string | null, mode: string | null, file: string, blocks: TakeBlocks | null, klip_text: TakeText | null, duration: number, broll: string[], text: string | null }
+  /** the treatment this version carries (null = untreated): the renderer composes it from the takes' blocks */
   treatment: RecipeTreatment | null
 }
 
@@ -89,32 +104,16 @@ export interface RecipeTreatment {
   settings: unknown
   /** a curated combination: its parts, each drawn on its own part of the video */
   parts?: RecipeTreatment[]
-  /** the sidecar Klip makes for it (null: a layout, none needed; older manifests: not said) */
-  sidecar?: string | null
-  /** the takes that get one */
-  applies_to?: string[]
 }
 
 /**
- * A treated version plays the treated copies (sidecars) of the takes the treatment applies to.
- * Null when one of them is missing. Treatments without a sidecar leave the recipe as it is.
+ * Does every filmed take a treatment covers have what it needs? Each part's ingredients over that
+ * part's scope (docs/contract.md §5). Treatments that need nothing always do.
  */
-function withSidecars(recipe: Recipe, treatment: RecipeTreatment, byFile: Map<string, TakeClip>): Recipe | null {
-  const sidecar = treatment.sidecar
-  if (!sidecar) return recipe
-  const clips = treatment.applies_to ?? []
-  // '' is a beat shown on screen: nothing filmed, nothing to treat
-  const swap = (file: string, clip: string) => !file || !clips.includes(clip) ? file : byFile.get(file)?.sidecars?.[sidecar] ?? null
-  const hook = swap(recipe.hook.file, 'hook')
-  const cta = swap(recipe.cta.file, 'cta')
-  const beats = recipe.vo.beats.map(beat => ({ ...beat, vo: swap(beat.vo, 'vo') }))
-  if (hook === null || cta === null || beats.some(beat => beat.vo === null)) return null
-  return {
-    ...recipe,
-    hook: { ...recipe.hook, file: hook },
-    vo: { ...recipe.vo, beats: beats as RecipeBeat[] },
-    cta: { ...recipe.cta, file: cta }
-  }
+function hasIngredients(treatment: RecipeTreatment, takes: { take: TakeClip, role: TakeRole }[]): boolean {
+  return treatmentIngredients(treatment).every(need => takes
+    .filter(({ take, role }) => take.file && need.roles.includes(role))
+    .every(({ take }) => hasIngredient(take, need.ingredient)))
 }
 
 const isVideoFile = (file: string) => /\.(mp4|mov|m4v)$/i.test(file)
@@ -217,11 +216,10 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
   const broll = manifest.clips.filter((clip): clip is BrollClip => clip.kind === 'broll')
   const recipes: Recipe[] = []
   // the treatments that are on (older manifests have none)
-  const treatments: RecipeTreatment[] = (manifest.plan.treatments ?? []) as RecipeTreatment[]
+  const treatments: RecipeTreatment[] = ((manifest.plan.treatments ?? []) as RecipeTreatment[]).filter(isDrawable)
   // layouts (and combinations with a layout part) re-lay the beats; the rest are drawn on top
   const layouts = treatments.filter(treatment => layoutOf(treatment))
   const others = treatments.filter(treatment => !layoutOf(treatment))
-  const byFile = new Map(takes.filter(take => take.file).map(take => [take.file, take]))
   const offer = (manifest.plan.shoot.slot_values as Record<string, unknown> | null | undefined)?.offer
   const hasOffer = typeof offer === 'string' && offer.trim() !== ''
 
@@ -277,7 +275,15 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
       /** does a treatment (other than a layout; a combination: every part) apply to this version? */
       const meets = (treatment: RecipeTreatment) => treatment.needs.every(need =>
         need === 'text' || (need === 'speaker_video' && speakerVideo) || (need === 'offer' && hasOffer))
-      const applies = (treatment: RecipeTreatment) => nonLayoutParts(treatment).every(meets)
+      // the takes a treatment can cover, each with its role: the hook, the VO's beats, the CTA
+      const roleOf = (take: TakeClip, fallback: TakeRole): TakeRole => take.role ?? fallback
+      const covered = (hook: TakeClip, cta: TakeClip) => [
+        { take: hook, role: roleOf(hook, 'hook') },
+        ...body.map(beat => ({ take: beat, role: roleOf(beat, 'beat') })),
+        { take: cta, role: roleOf(cta, 'cta') }
+      ]
+      const applies = (treatment: RecipeTreatment, hook: TakeClip, cta: TakeClip) =>
+        nonLayoutParts(treatment).every(meets) && hasIngredients(treatment, covered(hook, cta))
 
       // the untreated version, then one per layout treatment that changes something
       for (const layoutTreatment of [null, ...layouts]) {
@@ -287,10 +293,12 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
           if (laidOut.every(take => shownAs(take) === layout)) continue
           if (!layoutTreatment.needs.every(need => need !== 'speaker_video' || speakerVideo)) continue
           // a combination's other parts have to apply too
-          if (!applies(layoutTreatment)) continue
+          if (!nonLayoutParts(layoutTreatment).every(meets)) continue
         }
         for (const hook of hookChoices) {
           for (const cta of ctaChoices) {
+            // a combination's ingredients, on these takes
+            if (layoutTreatment && !hasIngredients(layoutTreatment, covered(hook, cta))) continue
             const base = standalone
               ? mixed
                 ? `${shoot}_${channel}_mix_${first.code}-${beats.map(beat => beat.person).join('.')}`
@@ -327,9 +335,10 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
                   files = picked
                 }
                 filled.push({
-                beat: beat.beat ?? '', option: beat.option ?? 1, person: beat.person, show: showOf(beat), vo: beat.file,
-                text: showOf(beat) === 'screen' ? beat.script : null, duration: beat.duration!, broll: files
-              })
+                  beat: beat.beat ?? '', option: beat.option ?? 1, person: beat.person, show: showOf(beat), vo: beat.file,
+                  blocks: beat.blocks ?? null, klip_text: beat.text ?? null,
+                  text: showOf(beat) === 'screen' ? beat.script : null, duration: beat.duration!, broll: files
+                })
               }
               if (!valid) break
               // a VO CTA (or a standalone CTA shown over b-roll) plays over b-roll, product shots first
@@ -357,27 +366,24 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
                 standalone,
                 hook: {
                   code: hook.code, person: hook.person, item_id: hook.item_id, take: standalone ? takeKeyOf(hook) : null,
-                  file: hook.file, caption: hook.caption, duration: hook.duration!, hook_type: hook.hook_type,
+                  file: hook.file, blocks: hook.blocks ?? null, klip_text: hook.text ?? null, duration: hook.duration!, hook_type: hook.hook_type,
                   show: standalone ? showOf(hook) : 'face', broll: hookBroll,
                   text: standalone && showOf(hook) === 'screen' ? hook.script : null
                 },
                 vo: { code: first.code, item_id: itemIds.join('+'), item_ids: itemIds, format: first.format, beats: filled },
                 cta: {
                   code: cta.code, person: cta.person, item_id: cta.item_id, take: standalone ? takeKeyOf(cta) : null,
-                  mode: ctaMode, file: cta.file, caption: cta.caption, duration: cta.duration!, broll: ctaBroll,
+                  mode: ctaMode, file: cta.file, blocks: cta.blocks ?? null, klip_text: cta.text ?? null, duration: cta.duration!, broll: ctaBroll,
                   text: standalone && ctaShow === 'screen' ? cta.script : null
                 },
-                vo_captions: body.map(beat => beat.caption),
                 treatment: layoutTreatment
               }
-              // a combination with a layout plays its treated copies too
-              const laid = layoutTreatment ? withSidecars(recipe, layoutTreatment, byFile) : recipe
-              if (laid) recipes.push(laid)
-              // the other treatments: a version of the untreated recipe for each that applies
+              recipes.push(recipe)
+              // the other treatments: a version of the untreated recipe for each that applies, with
+              // the same files (the renderer composes the treatment from the takes' blocks)
               if (!layoutTreatment) {
-                for (const treatment of others.filter(applies)) {
-                  const treated = withSidecars(recipe, treatment, byFile)
-                  if (treated) recipes.push({ ...treated, id: `${recipe.id}_${treatment.slug}`, treatment })
+                for (const treatment of others.filter(treatment => applies(treatment, hook, cta))) {
+                  recipes.push({ ...recipe, id: `${recipe.id}_${treatment.slug}`, treatment })
                 }
               }
             }

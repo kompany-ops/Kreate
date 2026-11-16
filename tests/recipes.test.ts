@@ -4,10 +4,18 @@ import type { Recipe } from '../shared/utils/recipes'
 import { elementId, elementRecords, elementState, pickBatch, recipeElements } from '../shared/utils/batchLoop'
 import { batchCsv, batchOrder, batchSize, beatMixes, buildRecipes, byChannel, chooseBatch, nextBatchCode, pickCombos, renderFolder } from '../shared/utils/recipes'
 
-const take = (kind: TakeClip['kind'], code: string, person: string, channel: string, extra: Partial<TakeClip> = {}): TakeClip => ({
-  kind, code, person, channel, item_id: `${channel}-${person}-${code}`, beat: null, format: null, feature: null, mode: kind === 'cta' ? 'sync' : null,
-  hook_type: null, script: '', file: `${channel}/${kind}/${person}/${code}.mp4`, raw_file: '', caption: null, duration: 3, ...extra
+/** every block and text Klip could make for a take, so any treatment has what it needs */
+const everything = (file: string) => ({
+  blocks: { captions: file.replace('.mp4', '.captions.webm'), 'cutout': file.replace('.mp4', '.cutout.webm'), 'captions-retro': file.replace('.mp4', '.captions-retro.webm') },
+  text: { search_query: 'why is my dog so anxious', placed_text: { text: 'Calm in 20 minutes', x: 0.5, y: 0.3 } }
 })
+const take = (kind: TakeClip['kind'], code: string, person: string, channel: string, extra: Partial<TakeClip> = {}): TakeClip => {
+  const file = extra.file ?? `${channel}/${kind}/${person}/${code}.mp4`
+  return {
+    kind, role: kind === 'vo' ? 'beat' : kind, code, person, channel, item_id: `${channel}-${person}-${code}`, beat: null, format: null, feature: null, mode: kind === 'cta' ? 'sync' : null,
+    hook_type: null, script: '', file, raw_file: '', ...(file ? everything(file) : { blocks: null }), duration: 3, ...extra
+  }
+}
 const vo = (code: string, person: string, channel: string, beats: [string, number][], format = 'F01') =>
   beats.map(([beat, duration]) => take('vo', code, person, channel, { beat, duration, format, file: `${channel}/vo/${person}/${beat}/${code}.mp4` }))
 const clip = (channel: string, section: string, name: string, duration: number, feature: string | null = null): BrollClip => ({
@@ -254,9 +262,16 @@ describe('wordings and standalone VOs', () => {
   })
 })
 
+/** the Library's treatments, with their components and placements as in the database */
+const COMPONENT: Record<string, [string, string]> = {
+  'Search bar': ['search_bar', 'hook'], 'Unusual text placement': ['placed_text', 'hook'], 'Greenscreen': ['greenscreen', 'video'],
+  'Picture-in-picture': ['picture_in_picture', 'video'], 'Retro look': ['retro_look', 'video'], 'Face to camera': ['layout', 'video'],
+  'Over b-roll': ['layout', 'video'], 'Offer badge': ['offer_badge', 'cta'], 'Then & now labels': ['then_now_labels', 'video']
+}
+const treatment = (name: string, kind: string, needs: string[], settings: Record<string, unknown> = {}) =>
+  ({ slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, kind, placement: COMPONENT[name]?.[1] ?? 'video', needs, component: COMPONENT[name]?.[0] ?? 'x', settings })
+
 describe('treatments', () => {
-  const treatment = (name: string, kind: string, needs: string[], settings: Record<string, unknown> = {}) =>
-    ({ slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, kind, placement: 'video', needs, component: 'x', settings })
   const withTreatments = (clips: Manifest['clips'], treatments: ReturnType<typeof treatment>[], slotValues: Record<string, string> = {}) => {
     const m = manifest(clips)
     m.plan = { ...m.plan, shoot: { ...m.plan.shoot, slot_values: slotValues }, treatments } as Manifest['plan']
@@ -269,16 +284,13 @@ describe('treatments', () => {
     const recipes = buildRecipes(withTreatments(clips, [
       treatment('Search bar', 'overlay', ['text']),
       treatment('Greenscreen', 'footage', ['speaker_video']),
-      // needs the shoot's offer, which isn't filled in: not applied
+      // components the renderer can't draw: never applied, even with an offer on the shoot
       treatment('Offer badge', 'overlay', ['offer']),
-      // the footage library isn't built yet: never applied
       treatment('Then & now labels', 'overlay', ['old_footage'])
-    ]))
+    ], { offer: '20% off' }))
     expect(recipes.map(recipe => recipe.id).sort()).toEqual([plain!.id, `${plain!.id}_greenscreen`, `${plain!.id}_search-bar`].sort())
     expect(recipes.find(recipe => recipe.id === plain!.id)!.treatment).toBeNull()
     expect(recipes.find(recipe => recipe.id.endsWith('_search-bar'))!.treatment!.name).toBe('Search bar')
-    // with an offer on the shoot, the offer badge applies too
-    expect(buildRecipes(withTreatments(clips, [treatment('Offer badge', 'overlay', ['offer'])], { offer: '20% off' }))).toHaveLength(2)
   })
 
   it('re-lays the beats for a layout treatment, and skips one that would change nothing', () => {
@@ -337,8 +349,8 @@ describe('a text thread', () => {
     expect(recipe!.vo.beats.map(beat => `${beat.beat}/${beat.show}/${beat.broll.length}`)).toEqual(['voice note/voice_note/0', 'reply/voice_note/0'])
   })
 
-  it('leaves it alone for layout treatments, but takes overlays that need nothing', () => {
-    const t = (name: string, kind: string, needs: string[], settings = {}) => ({ slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, kind, placement: 'video', needs, component: 'x', settings })
+  it('leaves it alone for layout treatments, but takes overlays that need nothing but what Klip made', () => {
+    const t = treatment
     const m = withPlan([...thread('joe'), ...nixBroll])
     m.plan = { ...m.plan, treatments: [t('Face to camera', 'layout', ['speaker_video'], { show: 'face' }), t('Over b-roll', 'layout', [], { show: 'broll' }), t('Greenscreen', 'footage', ['speaker_video']), t('Retro look', 'overlay', [])] } as Manifest['plan']
     expect(buildRecipes(m).map(recipe => recipe.treatment?.name ?? null).sort()).toEqual([null, 'Retro look'].sort())
@@ -352,30 +364,45 @@ describe('a text thread', () => {
   })
 })
 
-describe('treatment sidecars', () => {
-  const retro = { slug: 'retro-look', name: 'Retro look', kind: 'overlay', placement: 'video', needs: [], component: 'x', settings: {}, sidecar: 'retro-look', applies_to: ['hook', 'vo', 'cta'] }
-  const treated = (file: string) => file.replace('.mp4', '.retro-look.mp4')
-  const clips = (sidecars: boolean) => [take('hook', 'H01', 'joe', 'nix'), ...vo('V01', 'joe', 'nix', [['problem', 3], ['product', 2]]), take('cta', 'C01', 'joe', 'nix')]
-    .map(clip => sidecars ? { ...clip, sidecars: { 'retro-look': treated(clip.file) } } : clip)
-  const build = (sidecars: boolean) => {
-    const m = manifest([...clips(sidecars), ...nixBroll])
-    m.plan = { ...m.plan, treatments: [retro] } as Manifest['plan']
+describe('treatment ingredients', () => {
+  const clips = () => [take('hook', 'H01', 'joe', 'nix'), ...vo('V01', 'joe', 'nix', [['problem', 3], ['product', 2]]), take('cta', 'C01', 'joe', 'nix')]
+  const build = (takes: TakeClip[], treatments: ReturnType<typeof treatment>[]) => {
+    const m = manifest([...takes, ...nixBroll])
+    m.plan = { ...m.plan, treatments } as Manifest['plan']
     return buildRecipes(m)
   }
+  const retro = treatment('Retro look', 'overlay', [])
 
-  it('a treated version plays the treated copies', () => {
-    const recipes = build(true)
+  it('a treated version keeps the takes, and every take carries its blocks and Klip\u2019s text', () => {
+    const recipes = build(clips(), [retro])
     expect(recipes).toHaveLength(2)
     const version = recipes.find(recipe => recipe.treatment)!
-    expect(version.hook.file).toBe('nix/hook/joe/H01.retro-look.mp4')
-    expect(version.vo.beats.map(beat => beat.vo)).toEqual(['nix/vo/joe/problem/V01.retro-look.mp4', 'nix/vo/joe/product/V01.retro-look.mp4'])
-    expect(version.cta.file).toBe('nix/cta/joe/C01.retro-look.mp4')
-    // the untreated one is as it was
-    expect(recipes.find(recipe => !recipe.treatment)!.hook.file).toBe('nix/hook/joe/H01.mp4')
+    const plain = recipes.find(recipe => !recipe.treatment)!
+    expect(version.hook.file).toBe('nix/hook/joe/H01.mp4')
+    expect(version.vo.beats.map(beat => beat.vo)).toEqual(plain.vo.beats.map(beat => beat.vo))
+    expect(version.hook.blocks).toMatchObject({ captions: 'nix/hook/joe/H01.captions.webm', 'captions-retro': 'nix/hook/joe/H01.captions-retro.webm' })
+    expect(version.vo.beats[0]!.blocks).toMatchObject({ captions: 'nix/vo/joe/problem/V01.captions.webm' })
+    expect(version.hook.klip_text).toMatchObject({ search_query: 'why is my dog so anxious' })
+    expect(version.treatment).not.toHaveProperty('sidecar')
+    expect(plain).not.toHaveProperty('vo_captions')
   })
 
-  it('isn\u2019t made when a treated copy is missing', () => {
-    expect(build(false).map(recipe => recipe.treatment)).toEqual([null])
+  it('isn\u2019t made when a take it covers is missing an ingredient', () => {
+    // no cut-out of the product beat: greenscreen covers every take, so no greenscreen version
+    const noCutout = clips().map(clip => clip.beat === 'product' ? { ...clip, blocks: { captions: 'x.captions.webm' } } : clip)
+    expect(build(noCutout, [treatment('Greenscreen', 'footage', ['speaker_video'])]).map(recipe => recipe.treatment)).toEqual([null])
+    // the search bar covers hooks only: a CTA without a query doesn't matter, a hook without one does
+    const ctaWithout = clips().map(clip => clip.kind === 'cta' ? { ...clip, text: undefined } : clip)
+    expect(build(ctaWithout, [treatment('Search bar', 'overlay', ['text'])])).toHaveLength(2)
+    const hookWithout = clips().map(clip => clip.kind === 'hook' ? { ...clip, text: undefined } : clip)
+    expect(build(hookWithout, [treatment('Search bar', 'overlay', ['text'])])).toHaveLength(1)
+  })
+
+  it('a combination needs each part\u2019s ingredients over that part\u2019s takes', () => {
+    const combo = { ...treatment('Search, then face to camera', 'layout', ['speaker_video', 'text']), component: 'combo', parts: [treatment('Search bar', 'overlay', ['text']), treatment('Face to camera', 'layout', ['speaker_video'], { show: 'face' })] }
+    expect(build(clips(), [combo])).toHaveLength(2)
+    const hookWithout = clips().map(clip => clip.kind === 'hook' ? { ...clip, text: undefined } : clip)
+    expect(build(hookWithout, [combo])).toHaveLength(1)
   })
 })
 

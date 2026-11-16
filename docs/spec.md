@@ -30,8 +30,8 @@ This spec covers the Library, Brands and Planner. Ingest, rendering and submissi
 1. **Library** — reusable, brand-agnostic templates. *(this project)*
 2. **Planner** — build a shoot for one product, run it on set, export shot lists, `shootsheet.json` and folder skeleton. *(this project)*
 3. **Dropbox uploads** — clips land in the right shoot folders. *(built; see §12)*
-4. **Klip** — edits every clip in a shoot's `raw/` into `edited/` (trims dead space, captions) and makes each treatment's treated copies (sidecars). It knows nothing about recipes. *(separate tool; see §12b)*
-5. **Recipes and batches** — Kreate builds every recipe when the shoot goes Live and picks each batch (§12b); **Showdog** stitches each recipe exactly as specified, with no rules of its own. There are no human editors.
+4. **Klip** — edits every clip in a shoot's `raw/` into `edited/` (trims dead space, captions) into building blocks (each take's clip, its captions, and whatever the shoot's treatments need) and indexes them in `edited/_klip.json`; its renderer (ex-Showdog) composes each recipe. The agreement between the two is [docs/contract.md](contract.md). *(separate tool; see §12b)*
+5. **Recipes and batches** — Kreate builds every recipe when the shoot goes Live and picks each batch (§12b); **Klip's renderer** composes each recipe exactly as specified, with no rules of its own. There are no human editors.
 6. Submission queue + form-filling Chrome extension. *(later)*
 
 ---
@@ -254,7 +254,7 @@ Hooks, CTAs and VOs written in a shoot (`shoot_id` set) can be deleted (RLS), wh
 - `kind` — `layout` (changes which footage plays), `overlay` (a layer drawn on top) or `footage` (needs Klip to prepare clips)
 - `placement` — `hook`, `video` (the whole video) or `cta`
 - `needs text[]` — what a recipe must have for it: `text` (AI writes it from the script), `speaker_video`, `old_footage`, `offer`
-- `component text`, `settings jsonb` — what Showdog draws it with, and how
+- `component text`, `settings jsonb` — what Klip's renderer draws it with, and how. Only the contract's components can be drawn (`layout`, `search_bar`, `placed_text`, `retro_look`, `greenscreen`, `picture_in_picture`, and `combo` of those: docs/contract.md §5); any other makes no versions, is flagged in the Library and can't be switched on
 - `active` — on: applied to every recipe that has what it needs; off: kept, not applied
 - `system` — built in (Face to camera, Over b-roll): always on; can't be switched off, archived, deleted or changed in kind (a trigger enforces it)
 - `parts uuid[]` — a **curated combination**: the treatments it's made of, each drawn on its own part of the video (at most one sets how the VO looks: a layout, greenscreen or picture-in-picture; no two overlays on the same part). It applies where every part would. Only combinations set up in the Library exist; nothing else combines.
@@ -319,7 +319,7 @@ Snapshots matter: editing a template later must never change a shoot that's alre
 - `status text check (status in ('batched','rendering','submitted','measured')) default 'batched'`, `status_at` — when it last moved
 - `exploit_share numeric` — the exploit share it was picked with
 
-**batch_scores** — one score per element a measured batch used: `shortlist_id`, `element_kind` (`hook`, `vo`, `cta`, `format`, `hook_type`, `treatment`, `person`), `element_key` (a code, hook type, treatment sidecar slug or person slug), `score` (`winner` | `mid` | `loser`), `notes`.
+**batch_scores** — one score per element a measured batch used: `shortlist_id`, `element_kind` (`hook`, `vo`, `cta`, `format`, `hook_type`, `treatment`, `person`), `element_key` (a code, hook type, treatment slug or person slug), `score` (`winner` | `mid` | `loser`), `notes`.
 
 **shoot_element_overrides** — an element dropped (`dropped` true) or kept (false) by hand, overriding the automatic drop: `shoot_id`, `element_kind`, `element_key`.
 
@@ -518,7 +518,7 @@ Items: `file` is the edited clip (what the worker reads) and `raw_file` where Kr
 
 Download a zip of empty folders (each with a `.keep` file) plus the plan's `manifest.json`, to unzip into the Dropbox `UGC/` root folder. With Dropbox connected, the same tree is created directly in Dropbox instead (§12).
 
-Everything from a shoot lives in its shoot folder, and everything a shoot produces is split by channel first: clips, recipes and renders. `raw/` and `edited/` have exactly the same tree: Kreate only uploads to `raw/`; Klip edits each clip into the same place under `edited/`, with any treated copies beside it (§12b).
+Everything from a shoot lives in its shoot folder, and everything a shoot produces is split by channel first: clips, recipes and renders. `raw/` and `edited/` have exactly the same tree: Kreate only uploads to `raw/`; Klip edits each take into the same place under `edited/`, with its blocks beside it (§12b).
 
 ```
 UGC/
@@ -527,7 +527,7 @@ UGC/
       manifest.json                        the plan; the full index of every clip once Live
       raw/
         [channel]/                         topdognix/, topdogwhiskey/, topdogsiblings/: split by channel first
-          hooks/[person]/H##.mov           one file per hook, named by code, captions alongside (H##.srt)
+          hooks/[person]/H##.mov           one file per hook, named by code
           vo/[person]/[beat]/V##.mov       a VO filmed beat by beat, a folder per beat as in b-roll:
                                            problem/V01.mov, product/V01.mov…
           ctas/[person]/C##.mov
@@ -546,7 +546,7 @@ UGC/
 ```
 
 - **Hooks, VOs and CTAs are files named by code**, keeping their own extension. Re-adding one replaces the file. Klip saves the edited clip under the same name in `edited/` (the extension can differ).
-- **Captions** sit next to their clip under the same name (e.g. `H01.srt` beside `H01.mov`, `problem/V01.srt` beside `problem/V01.mov`), in `raw/` and `edited/` alike; there's no separate captions folder. Kreate writes them when each hook, CTA and VO beat uploads: the script that was read, split into short lines (sentence breaks, at most ~32 characters / 6 words) and timed across the clip's measured length in proportion to each line's length. Klip polishes them into `edited/`.
+- **Captions** are Klip's: it makes each take's captions as a block beside the edited clip (`H01.captions.webm`), from what was said. Kreate writes nothing beside the clips it uploads.
 - **B-roll** is per shoot and loose: any clip in a beat folder can go under any VO with that beat, so clips keep their own names and a clash gets a number rather than overwriting. Beats are filed by name, so the same beat in two formats (e.g. `product`) shares a folder; general product shots go in `general/`. `shared` stands in for the channel only when a shoot has no channels.
 
 All slugs lowercase kebab-case; generate once and never change after a shoot is planned.
@@ -594,11 +594,11 @@ Goal: clips go straight from the shoot into the right Dropbox folders (§10d), s
 
 Once a shoot is **filmed**, its General tab shows **Filmed? Send it for editing**.
 
-- **Start editing** writes the plan's manifest (a new version, no clips) to `manifest.json` and sets the shoot to `editing`. It's what **Klip** works from: the plan, and the treatments that are on (combinations with their parts), each with its `description` (Klip's AI writes the treatment's text from it), its `sidecar` name and `applies_to`, the takes that need a treated copy. **Back to filmed** undoes it.
-- **Klip** walks `raw/`, edits each clip into the same place in `edited/` (trims dead space, captions), and for each treatment puts a treated copy beside every clip it applies to: `<clip>.<sidecar>.<ext>` (`hooks/joe/H01.search-bar.mp4`), one per treatment or combination. Where they go: a hook treatment on hooks (and a standalone VO's hook beat), a CTA treatment on CTAs (and a standalone VO's CTA beat), a whole-video treatment on every take, and footage that needs the speaker (greenscreen, picture-in-picture) on VO takes only. A layout (face to camera, over b-roll) needs none: it only chooses which footage plays. A combination gets one wherever any of its non-layout parts applies. B-roll is never treated. Klip knows nothing about recipes.
-- **Check edits** (runs in the browser, talking to Dropbox directly so a big shoot isn't cut short): lists `raw/` and `edited/` and checks that every filmed take is in both, named by its code (a VO beat by beat, in its beat's folder: `problem/V01`), a video; that `edited/` mirrors `raw/` clip for clip (same folders and names; extensions can differ; sidecars aren't extras); that every take has the treated copies it needs; that no clips are still on phones; and reads every edited clip's **length** (sidecars play for their clip's length). Any problem blocks going Live, unless someone goes Live anyway (whatever's missing is left out and the problems are noted in the manifest).
+- **Start editing** writes the plan's manifest (a new version, no clips) to `manifest.json` and sets the shoot to `editing`. It's what **Klip** works from: the plan, the treatments that are on and can be drawn (combinations with their parts), and `plan_hash`, a hash of the takes (spot and role) and those treatments, which doesn't change as the shoot is filmed. **Back to filmed** undoes it.
+- **Klip** (docs/contract.md) finds each take from the plan, edits it into building blocks in the same place in `edited/` (the `clip` and its `captions`, plus a `cutout` or `captions-retro` where a treatment needs them) and writes text some treatments need (a `search_query`, `placed_text`). What a treatment needs follows from its component, over the takes its placement covers (hook, CTA, or every take; a standalone VO's hook and CTA beats count as a hook and a CTA). It indexes everything in `edited/_klip.json`, with each take's length and anything a person should look at. Klip knows nothing about recipes.
+- **Check edits** (runs in the browser, talking to Dropbox directly): reads Klip's index and checks it's for this plan (`plan_hash`, the one in the manifest Klip was given) and a contract version Kreate knows; that every filmed take was edited, with its clip and captions in `edited/`; that every treatment that's on has its ingredients on every take it covers; that every raw clip is accounted for (edited, still waiting, or set aside by Klip as a duplicate or at no spot); and that no clips are still on phones. Lengths come from the index; Kreate never reads `edited/` media. What Klip flags for a look shows as a warning and never blocks. Any problem blocks going Live, unless someone goes Live anyway (whatever's missing is left out and the problems are noted in the manifest).
 - **Go Live** writes the full **manifest** and every recipe (`recipes.json`), and sets the shoot to `edited`, shown as **Live**. The treatments are the ones Klip was given, even if the Library changed since. From here the recipes are fixed: batches reference them by ID.
-- **The manifest** (`manifest.json` in the shoot folder, and a copy in `shoot_manifests` with a version number) indexes every clip once, so batching never re-reads Dropbox: the plan, and for every take its kind, channel, person, code, beat and wording (VOs), how it's shown, format, CTA mode, hook type, the script read, its `edited/` and `raw/` file, its caption file, its length and its `sidecars` (treatment sidecar → file); for every b-roll clip its channel, beat folder (or `general`), feature folder and the shot it was filmed for. Before that, `manifest.json` holds just the plan.
+- **The manifest** (`manifest.json` in the shoot folder, and a copy in `shoot_manifests` with a version number) indexes every clip once, so batching never re-reads Dropbox: the plan, and for every take its kind, channel, person, code, beat and wording (VOs), how it's shown, format, CTA mode, hook type, the script read, its role, its `edited/` and `raw/` file, its `blocks` (captions and what the treatments need) and `text`, and its length; for every b-roll clip its channel, beat folder (or `general`), feature folder and the shot it was filmed for. Before that, `manifest.json` holds just the plan. Every manifest carries `plan_hash`.
 
 ### Recipes and batches
 
@@ -615,13 +615,13 @@ Once a shoot is Live its details lock (nothing in the plan's tabs can change), t
 - **How beats are shown**: a beat shown face to camera has no b-roll; one shown over b-roll is covered as below.
 - **B-roll variations**: each hook + VO + CTA gets up to `broll_variations` b-roll selections, each its own recipe (the first keeps the seed recipes always had; later ones stop when the b-roll can't give a different selection).
 - **B-roll per beat**: covered by that channel's clips filed under the beat (beats are filed by name across formats): its generic clips plus any filed for the feature the VO is about (`b-roll/<beat>/<feature>/`; other features' b-roll is never used), added clip by clip in a fixed order until their combined length covers the beat's recording; **general product shots** top a beat up only when its own clips run short. Never looped or slowed: a beat that can't be covered makes the recipe invalid. **No clip repeats** within one video. A **VO CTA** is covered the same way, product shots first.
-- **Treated versions** play the treated copies of the takes the treatment applies to (`hook.file`, each beat's `vo` and `cta.file` point at the sidecars), and aren't made when one is missing. B-roll selection is all Kreate's: exact picks per beat, deterministic.
+- **Treated versions** keep the untreated version's takes: Klip's renderer composes the treatment from their blocks. One is made only when every take the treatment covers has its ingredients. Every take in `recipes.json` (version 3) carries its `blocks` and `klip_text`. B-roll selection is all Kreate's: exact picks per beat, deterministic.
 - Every clip must be in the manifest with a length. The stitcher trims (evenly, proportionally, head and tail; ~1.2 s minimum) and offsets the per-clip captions; hook, VO and CTA clips are never trimmed.
 - **Recipe IDs are deterministic**: `S001_topdognix_joe_H01_V02_C01_<hash of the b-roll picks>`, or for a mixed VO `S001_topdognix_mix_joe-H01_V02-joe.sam.joe_sam-C01_<hash>` (whose hook, whose beat in order, whose CTA). The same inputs give the same ID, which is also the render's file name.
 
 **Batches** (a batch is what gets rendered and submitted to the brand; `shared/utils/batchLoop.ts`):
 
-- **The loop**: each batch goes **Batched** → **Rendering** (Showdog) → **Submitted** (to the brand) → **Measured**. The next batch can only be made once every batch before it is measured, so each learns from the last.
+- **The loop**: each batch goes **Batched** → **Rendering** (Klip) → **Submitted** (to the brand) → **Measured**. The next batch can only be made once every batch before it is measured, so each learns from the last.
 - **Size** = the shoot's batch size (default 5%) × all valid recipes, at least one.
 - **Never batch a recipe ID twice** (`shoot_shortlists.entry_ids`): no recipe is in more than one batch.
 - **Measuring** scores every element the batch used (`batch_scores`): its treatments, hooks, formats, hook types, VOs, CTAs and people (b-roll isn't scored; a standalone VO's hook and CTA are scored with the VO), each **Winner**, **Mid** or **Loser**, by Motion's benchmark definitions, judged on the ads that used it once they've had time to spend:
@@ -634,20 +634,20 @@ Once a shoot is Live its details lock (nothing in the plan's tabs can change), t
   - **Exploit**: the shoot's exploit share (70% by default, editable per shoot, recorded on each batch) goes to recipes with the most winning elements, treatments, hooks and formats counting double;
   - **Explore**: the rest goes to recipes with the most untried elements (weighted the same way). Either side running short is topped up from the rest. Before anything has won, the whole batch explores.
 - **Spread** (Best in Show, within exploit and explore alike): no two recipes in a batch share a hook + VO pair (a shared hook is fine), so b-roll variations of one recipe go in later batches; each pick is then the recipe whose person, then format, then hook type, then treatment has been used least so far; CTAs and b-roll only break ties. A mixed VO is its own VO here, and mixed recipes count as one more "person".
-- **Files**: `recipes.json` (every valid recipe, written when the shoot goes Live), `batches/B01.json` (the recipe IDs grouped by channel, in pick order within each, with the manifest version and how many exploit and explore; plus `B01.csv` for people, in the same order) and an empty `renders/B01/<channel>/` for each channel in the batch. Showdog renders each recipe to `renders/B01/<channel>/<recipe id>.mp4` from `edited/` and writes `renders/B01/report.json`.
+- **Files**: `recipes.json` (every valid recipe, written when the shoot goes Live), `batches/B01.json` (the recipe IDs grouped by channel, in pick order within each, with the manifest version and how many exploit and explore; plus `B01.csv` for people, in the same order) and an empty `renders/B01/<channel>/` for each channel in the batch. Klip's renderer renders each recipe to `renders/B01/<channel>/<recipe id>.mp4` from `edited/` and writes `renders/B01/report.json`.
 
 ### Treatments
 
 A treatment is a way a finished recipe is presented: a layout (every beat face to camera, or every beat over b-roll), an on-screen layer (search bar, retro look, unusual text placement) or footage Klip prepares (greenscreen, picture-in-picture). Each tool does only its own part:
 
-- **Kreate (the Library and the rules).** The Library's **Treatments** tab: each treatment has a name, its kind, where it goes (hook, whole video or CTA), what it needs, its Showdog component and settings, a source link and an on/off switch. Built in and always on: **Face to camera** and **Over b-roll**. The plan lists the treatments that are on (`treatments`), and the recipe builder applies them:
+- **Kreate (the Library and the rules).** The Library's **Treatments** tab: each treatment has a name, its kind, where it goes (hook, whole video or CTA), what it needs, its component and settings, a source link and an on/off switch. Built in and always on: **Face to camera** and **Over b-roll**. The plan lists the treatments that are on (`treatments`), and the recipe builder applies them:
   - every recipe also gets **one version per treatment that applies** to it, alongside the untreated one (one treatment or curated combination per version, so they add rather than multiply). A combination's version carries its parts, each with its own spec. Each version is its own recipe: its ID is the untreated one's plus the treatment's slug (`…_<hash>_search-bar`), and `recipe.treatment` says which (null = untreated). Untreated IDs don't change;
   - a **layout** treatment re-lays the VO's beats (and a standalone VO's own hook and CTA; Library hooks and CTAs keep their own mode) and is covered again with b-roll. It's skipped where it changes nothing, or where the b-roll can't cover it;
   - any other treatment applies when the recipe has what it needs: **text** (always: Klip writes it), the **speaker's video** (every take is filmed; an audio-only take doesn't qualify), the shoot's **offer** (`{{offer}}` filled in); **old footage** isn't tracked yet, so those don't apply;
   - Best in Show spreads picks across treatments too, and never puts two versions of the same hook + VO in one batch;
   - the calculator counts every treated version, and the shoot's **General** tab has a collapsible **Treatments** card ("N of M applied") listing each treatment that's on with how many recipes it adds, or why it doesn't apply (for a combination, which part).
-- **Klip (makes the content).** For every clip a treatment applies to, it makes a treated copy (a sidecar, §12b): its AI writes the treatment's text from the treatment's description and the clip's script (a search query, the hook as placed text), and it prepares any footage it needs (a cut-out of the speaker for greenscreen or picture-in-picture). It never decides which treatments apply to which recipes.
-- **Showdog (stitches them).** A treated recipe's files are the sidecars, and it carries its treatment (component and settings); Showdog stitches exactly that, with no rules of its own.
+- **Klip (makes the content).** For every take a treatment covers, it makes the treatment's ingredients (docs/contract.md §5): its AI writes the text (a search query, the hook as placed text) from the treatment's description and the take's script, and it makes any blocks (a cut-out of the speaker, retro captions). It never decides which treatments apply to which recipes.
+- **Klip's renderer (composes them).** A treated recipe carries its treatment (component and settings) and its takes' blocks and text; the renderer composes exactly that, with no rules of its own.
 
 ### Text Thread format (F21)
 

@@ -4,8 +4,9 @@ import type { Json } from '#shared/types/database.types'
 
 // Treatments: ways a finished recipe is presented. Every active treatment applies to every recipe
 // that has what it needs, and each treated version is its own recipe, alongside the untreated
-// one. Kreate decides where they apply, Klip makes a treated copy of each clip they apply to, and
-// Showdog draws them from each recipe's spec. Built-in ones (face to camera, over b-roll) are
+// one. Kreate decides where they apply, Klip makes what each needs (by its component: a cut-out,
+// retro captions, a search query…), and Klip's renderer composes them from each recipe's spec
+// (docs/contract.md). Built-in ones (face to camera, over b-roll) are
 // always on: they can't be switched off, archived or deleted.
 const db = useDb()
 const run = useAction()
@@ -27,18 +28,16 @@ const NEEDS = [
   { label: 'Old footage', value: 'old_footage', help: 'Clips filmed before a date, from the footage library' },
   { label: 'The shoot\'s offer', value: 'offer', help: 'Only when the shoot fills {{offer}}' }
 ]
-// the components Showdog draws with (a new one has to be built in Showdog first)
-const COMPONENTS = [
-  { label: 'Layout (face or b-roll)', value: 'layout' },
-  { label: 'Search bar', value: 'search_bar' },
-  { label: 'Text thread', value: 'text_thread' },
-  { label: 'Retro look', value: 'retro_look' },
-  { label: 'Then & now labels', value: 'then_now_labels' },
-  { label: 'Offer badge', value: 'offer_badge' },
-  { label: 'Placed text', value: 'placed_text' },
-  { label: 'Greenscreen', value: 'greenscreen' },
-  { label: 'Picture-in-picture', value: 'picture_in_picture' }
-]
+// the components Klip's renderer draws (docs/contract.md §5): a new one comes with a new contract
+const COMPONENT_LABELS: Record<string, string> = {
+  layout: 'Layout (face or b-roll)',
+  search_bar: 'Search bar',
+  placed_text: 'Placed text',
+  retro_look: 'Retro look',
+  greenscreen: 'Greenscreen',
+  picture_in_picture: 'Picture-in-picture'
+}
+const COMPONENTS = Object.keys(COMPONENT_INGREDIENTS).map(value => ({ label: COMPONENT_LABELS[value] ?? value, value }))
 const labelOf = (list: { label: string, value: string }[], value: string) => list.find(entry => entry.value === value)?.label ?? value
 
 // built-in first, then in their own order
@@ -136,6 +135,10 @@ function fromParts() {
   }
 }
 const partNames = (row: Row<'treatments'>) => row.parts.map(id => byId(id)?.name ?? 'a removed treatment').join(' + ')
+/** can Klip's renderer draw it? Treatments it can't (older components) make no versions */
+const drawable = (row: Row<'treatments'>) => row.component === 'combo'
+  ? row.parts.length > 0 && row.parts.every(id => !!byId(id) && byId(id)!.component in COMPONENT_INGREDIENTS)
+  : row.component in COMPONENT_INGREDIENTS
 
 const canSave = computed(() => !!form.name.trim() && !!settings.value && isValidUrl(form.source_url) && !partProblem.value)
 
@@ -195,6 +198,7 @@ async function save() {
             {{ row.name }}
             <UBadge v-if="row.system" label="Built in" icon="i-lucide-lock" color="neutral" variant="outline" size="sm" />
             <UBadge v-if="row.parts.length" :label="`Combines ${partNames(row)}`" icon="i-lucide-layers" color="secondary" variant="subtle" size="sm" />
+            <UBadge v-if="!drawable(row)" label="Klip can't draw this yet: no versions" icon="i-lucide-circle-slash" color="warning" variant="subtle" size="sm" />
           </p>
           <p v-if="row.description" class="text-sm text-muted">
             {{ row.description }}
@@ -212,6 +216,7 @@ async function save() {
         <USwitch
           v-else
           :model-value="row.active"
+          :disabled="!row.active && !drawable(row)"
           :aria-label="row.active ? `Switch ${row.name} off` : `Switch ${row.name} on`"
           class="mt-1"
           @click.stop
@@ -279,7 +284,7 @@ async function save() {
               />
             </div>
           </UFormField>
-          <UFormField v-if="!form.combination" label="Showdog component" help="What Showdog draws it with. A new component has to be built in Showdog first.">
+          <UFormField v-if="!form.combination" label="Component" help="What Klip's renderer draws it with. A new one has to be built in Klip first.">
             <USelect v-model="form.component" :items="COMPONENTS" class="w-full" :disabled="form.system" />
           </UFormField>
           <UFormField v-if="!form.combination" label="Settings" help="Passed to the component as they are (JSON), e.g. position or colours" :error="settings ? undefined : 'Enter valid JSON, e.g. {}'">

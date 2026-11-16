@@ -57,12 +57,13 @@ async function generate() {
     if (!chosen.length) throw new Error('Nothing left to batch: every recipe has been batched or has a dropped element')
     const manifestVersion = loop.manifest.value!.version
     await dropboxUploader.writeText(`${base.value}/batches/${code}.json`, JSON.stringify({
-      // 8: recipes.json is written when the shoot goes Live; a treated version's files are the
-      // treated copies (sidecars) Klip made; `pick` says how many exploit winners and how many
-      // explore. 7: beats, hook and CTA can be shown screen (text: `text`, no file) or voice_note;
+      // 9: recipes.json is version 3: each take carries its blocks and Klip's text, and a treated
+      // version uses the untreated version's takes (docs/contract.md §7).
+      // 8: recipes.json is written when the shoot goes Live; `pick` says how many exploit winners
+      // and how many explore. 7: beats, hook and CTA can be shown screen (text: `text`, no file) or voice_note;
       // treatments can be combinations (`parts`). 6: recipe.treatment. 5: standalone VOs, each beat's
       // option and show. 4: hook.hook_type. 3: mixed VOs. 2: renders split by channel
-      schema_version: 8,
+      schema_version: 9,
       shoot: shoot.value.code,
       batch: code,
       manifest_version: manifestVersion,

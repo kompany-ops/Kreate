@@ -3,13 +3,14 @@ import type { Json } from '#shared/types/database.types'
 import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { BundleTreatment } from '#shared/utils/shootsheet'
 import type { EditsCheck, Manifest } from '#shared/utils/manifest'
+import type { KlipIndex } from '#shared/utils/klip'
 
-// Filmed → Editing → Live (spec §14). Starting editing writes the plan's manifest (the plan and the
-// treatments that are on, with which clips each needs a treated copy of) for Klip, which edits
-// raw/ into edited/ and puts each treatment's sidecars beside the clips. Once it's done, someone
-// checks its work against raw/ in Dropbox and reads every edited clip's length; going Live writes
-// the full manifest and every recipe (recipes.json), built from the edited clips. Batches start
-// from there. This runs in the browser, which talks to Dropbox directly, so a big shoot isn't cut short.
+// Filmed → Editing → Live (spec §14, docs/contract.md). Starting editing writes the plan's manifest
+// (the plan, the treatments that are on, and its plan_hash) for Klip, which edits raw/ into building
+// blocks in edited/ (each take's clip, captions, and what the treatments need) and writes its index,
+// edited/_klip.json. Once it's done, someone checks its work: the index against the plan, raw/ and
+// what's in edited/. Going Live writes the full manifest and every recipe (recipes.json), built from
+// the index. Batches start from there. This runs in the browser, which talks to Dropbox directly.
 const props = defineProps<{ bundle: LoadedShoot }>()
 const emit = defineEmits<{ changed: [] }>()
 
@@ -34,7 +35,8 @@ const handedOff = computed(() => {
   const treatments = latest.value?.data.plan?.treatments
   return treatments ? { ...props.bundle, treatments: treatments as unknown as BundleTreatment[] } : props.bundle
 })
-const sidecars = computed(() => shootSidecars(handedOff.value))
+/** the treatments Klip makes something for, as it was given them */
+const ingredients = computed(() => shootIngredients(handedOff.value))
 
 async function connected() {
   const status = await dropbox.refresh().catch(() => null)
@@ -69,11 +71,8 @@ async function backToFilmed() {
 
 // --- checking Klip's work ----------------------------------------------------------
 const checking = ref(false)
-const reading = reactive({ done: 0, total: 0 })
 const result = ref<EditsCheck | null>(null)
-let editedFiles: string[] = []
-let rawFiles: string[] = []
-let durations = new Map<string, number | null>()
+let index: KlipIndex | null = null
 let brollShots = new Map<string, string>()
 
 async function check() {
@@ -82,9 +81,10 @@ async function check() {
   checking.value = true
   result.value = null
   try {
-    const [raw, edited, clipRows] = await Promise.all([
+    const [raw, edited, indexText, clipRows] = await Promise.all([
       dropboxListFiles(`${base.value}/raw`),
       dropboxListFiles(`${base.value}/edited`),
+      dropboxReadText(`${base.value}/edited/_klip.json`),
       db.from('shoot_clips').select('target, path, state').eq('shoot_id', shoot.value.id)
     ])
     const rows = clipRows.data ?? []
@@ -96,24 +96,21 @@ async function check() {
         return relative ? [[relative, row.target.split(':')[1]!] as [string, string]] : []
       }))
 
-    // every edited clip's length, a few at a time (a sidecar plays for its clip's length)
-    const isSidecar = sidecarTest(handedOff.value)
-    const clips = edited.filter(file => isClip(file.path) && !isSidecar(file.path))
-    Object.assign(reading, { done: 0, total: clips.length })
-    durations = new Map()
-    const queue = [...clips]
-    await Promise.all(Array.from({ length: 6 }, async () => {
-      for (let file = queue.shift(); file; file = queue.shift()) {
-        durations.set(file.path, await dropboxDuration(`${base.value}/edited/${file.path}`, file.size))
-        reading.done++
+    // Klip's index of what it made: lengths and all come from here
+    let read: KlipIndex | { error: string } | null = null
+    if (indexText !== null) {
+      try {
+        const parsed = parseKlipIndex(JSON.parse(indexText))
+        read = parsed.index ?? { error: parsed.error }
+      } catch {
+        read = { error: 'Klip\'s index (edited/_klip.json) isn\'t valid JSON: Klip may still be writing it, so check again in a moment' }
       }
-    }))
-
-    editedFiles = edited.map(file => file.path)
-    rawFiles = raw.map(file => file.path)
-    result.value = checkEdits(handedOff.value, rawFiles, editedFiles, {
+    }
+    index = read && !('error' in read) ? read : null
+    result.value = checkEdits(handedOff.value, raw.map(file => file.path), edited.map(file => file.path), read, {
       onPhones: rows.filter(row => row.state === 'saved').length,
-      durations
+      // the plan Klip was given
+      planHash: latest.value?.data.plan_hash ?? planHash(handedOff.value)
     })
   } catch (error) {
     toast.add({ title: 'Couldn\'t read the shoot\'s folders', description: (error as Error).message, color: 'error', icon: 'i-lucide-cloud-alert' })
@@ -130,16 +127,21 @@ const saving = ref(false)
  */
 async function goLive(override = false) {
   if (!result.value || (!result.value.ok && !override)) return
+  if (!index) {
+    toast.add({ title: 'Klip\'s index isn\'t readable', description: 'Going Live builds everything from edited/_klip.json: check edits again once Klip has written it.', color: 'error' })
+    return
+  }
+  const klip = index
   if (override && !(await confirmDialog({
     title: 'Go Live anyway?',
-    description: `${result.value.problems.length} problem${result.value.problems.length === 1 ? '' : 's'} will be left as they are. Anything missing or without a readable length stays out of the manifest, so recipes that need it won't be made. The problems are noted in the manifest.`,
+    description: `${result.value.problems.length} problem${result.value.problems.length === 1 ? '' : 's'} will be left as they are. Anything Klip didn't make stays out of the manifest, so recipes (and treated versions) that need it won't be made. The problems are noted in the manifest.`,
     confirmLabel: 'Go Live anyway'
   }))) return
   saving.value = true
   const version = (latest.value?.version ?? 0) + 1
   const ok = await run(async () => {
     const generatedAt = new Date().toISOString()
-    const manifest = buildManifest(handedOff.value, editedFiles, rawFiles, durations, {
+    const manifest = buildManifest(handedOff.value, klip, {
       version,
       generatedAt,
       brollShots,
@@ -150,11 +152,12 @@ async function goLive(override = false) {
     await dropboxUploader.writeText(`${base.value}/manifest.json`, JSON.stringify(manifest, null, 2))
     // every recipe, b-roll and all, fixed from here: batches reference them by id
     await dropboxUploader.writeText(`${base.value}/recipes.json`, JSON.stringify({
-      schema_version: 2,
+      schema_version: RECIPES_SCHEMA_VERSION,
       shoot: shoot.value.code,
       manifest_version: version,
       generated_at: generatedAt,
-      // file paths are relative to the shoot's edited/ folder; a treated version's are its sidecars
+      // file paths are relative to the shoot's edited/ folder; a treated version uses the same takes,
+      // and the renderer composes the treatment from their blocks
       recipes
     }, null, 2))
     must(await db.from('shoot_manifests').insert({ shoot_id: shoot.value.id, version, data: manifest as unknown as Json }))
@@ -180,8 +183,8 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
             Filmed? Send it for editing
           </p>
           <p class="text-sm text-muted">
-            Writes the manifest Klip works from: the plan, and the treatments that are on, each with the clips it needs a treated copy of.
-            Klip edits raw/ into edited/ and puts each copy beside its clip.
+            Writes the manifest Klip works from: the plan and the treatments that are on.
+            Klip edits raw/ into edited/: each take's clip and captions, and whatever the treatments need.
           </p>
         </template>
         <template v-else>
@@ -192,8 +195,8 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
             <template v-if="latest">
               Klip's manifest v{{ latest.version }}, {{ when(latest.created_at) }}.
             </template>
-            Once Klip's done, check its work: every take in raw/ and edited/, edited/ mirroring raw/, every clip's length readable<template v-if="sidecars.length">, and a treated copy for each of {{ sidecars.map(sidecar => sidecar.name).join(', ') }}</template>.
-            Going Live builds every recipe from the edited clips.
+            Once Klip's done, check its work: its index (edited/_klip.json) is for this plan, every take is edited with its clip and captions, and every raw clip is accounted for<template v-if="ingredients.length">, with what {{ ingredients.map(treatment => treatment.name).join(', ') }} need</template>.
+            Going Live builds every recipe from Klip's index.
           </p>
         </template>
       </div>
@@ -204,7 +207,7 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
         <template v-else>
           <UButton label="Back to filmed" color="neutral" variant="ghost" size="sm" @click="backToFilmed" />
           <UButton
-            :label="checking ? (reading.total ? `Reading lengths ${reading.done}/${reading.total}` : 'Checking…') : 'Check edits'"
+            :label="checking ? 'Checking…' : 'Check edits'"
             icon="i-lucide-scan-search"
             size="sm"
             :loading="checking"
@@ -215,6 +218,25 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
     </div>
 
     <template v-if="result">
+      <UAlert
+        v-if="result.warnings.length"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-eye"
+        :title="`Klip suggests a look at ${result.warnings.length} take${result.warnings.length === 1 ? '' : 's'}`"
+        description="These don't stop the shoot going Live."
+      >
+        <template #description>
+          <ul class="list-disc space-y-0.5 pl-4">
+            <li v-for="warning in result.warnings.slice(0, 10)" :key="warning">
+              {{ warning }}
+            </li>
+            <li v-if="result.warnings.length > 10">
+              …and {{ result.warnings.length - 10 }} more
+            </li>
+          </ul>
+        </template>
+      </UAlert>
       <UAlert
         v-if="result.ok"
         color="success"

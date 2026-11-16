@@ -1,133 +1,148 @@
 // The shoot's manifest (spec §14): one index of every clip in edited/, built when the shoot goes
-// Live, so batching and later tools read it instead of Dropbox. Pure: the app lists Dropbox, reads
-// the clips' lengths and passes them in.
+// Live, so batching and later tools read it instead of Dropbox. Pure: the app lists Dropbox and
+// reads Klip's index (edited/_klip.json), and passes them in.
 //
-// Klip edits raw/ into edited/ and, for each treatment that needs one, puts a treated copy
-// beside each clip it applies to: <clip>.<treatment sidecar>.<ext>, e.g. "…/hooks/joe/H01.retro-look.mp4".
+// Klip edits each take in raw/ into building blocks in edited/: the clip, its captions, and
+// whatever the shoot's treatments need (a cut-out, retro captions), plus text for some treatments.
+// Its index says what it made; Kreate never inspects edited/ media (docs/contract.md).
 //
 // Paths here are relative to the shoot's raw/ or edited/ folder, e.g.
 // "topdognix/hooks/joe/H01.mov" or "topdognix/b-roll/problem/IMG_4821.mov".
 
 import type { BundleItem, ShootBundle } from './shootsheet'
-import type { BeatShow, SidecarClip } from './shootsheet'
-import { MANIFEST_SCHEMA_VERSION, STANDALONE_CTA_BEAT, STANDALONE_HOOK_BEAT, beatShow, sidecarClips, brollFolder, buildShootsheet, channelFolder, isStandalone, itemBeats, linkedCodes, resolveItemScript, shootFolder, takeLabel, takeSpot } from './shootsheet'
-import { DEFAULT_WORDS_PER_SECOND, beatWordings, estimateSeconds, parseBeats, parseTakeKey, slugify } from './slots'
+import type { BeatShow } from './shootsheet'
+import { MANIFEST_SCHEMA_VERSION, beatShow, brollFolder, buildShootsheet, channelFolder, isStandalone, itemBeats, linkedCodes, resolveItemScript, shootFolder, takeLabel, takeSpot } from './shootsheet'
+import type { Ingredient, KlipIndex, KlipTake, TakeBlocks, TakeRole, TakeText } from './klip'
+import { BLOCKS, ingredientsFor, isDrawable, isTextIngredient, planHash, takeRole, treatmentIngredients } from './klip'
+import { DEFAULT_WORDS_PER_SECOND, beatWordings, estimateSeconds, parseBeats, parseTakeKey } from './slots'
 
-const VIDEO = new Set(['mov', 'mp4', 'm4v', 'hevc'])
-const AUDIO = new Set(['m4a', 'mp3', 'wav', 'aac', 'caf', 'aif', 'aiff'])
-/** captions and other sidecars sit next to their clip and aren't clips themselves */
-const SIDECAR = new Set(['srt', 'vtt', 'txt', 'json', 'xml', 'ass'])
+const MEDIA = new Set(['mov', 'mp4', 'm4v', 'hevc', 'webm', 'm4a', 'mp3', 'wav', 'aac', 'caf', 'aif', 'aiff'])
 
 const extension = (path: string) => path.includes('.') ? path.slice(path.lastIndexOf('.') + 1).toLowerCase() : ''
 const withoutExtension = (path: string) => path.lastIndexOf('.') > path.lastIndexOf('/') ? path.slice(0, path.lastIndexOf('.')) : path
-const folderOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1)
-export const isClip = (path: string) => !SIDECAR.has(extension(path)) && !path.slice(path.lastIndexOf('/') + 1).startsWith('.')
-const kindOfFile = (path: string): 'video' | 'audio' | 'other' =>
-  VIDEO.has(extension(path)) ? 'video' : AUDIO.has(extension(path)) ? 'audio' : 'other'
+const fileName = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+/** a media file (not captions, notes or Klip's index), and not hidden */
+export const isMedia = (path: string) => MEDIA.has(extension(path)) && !fileName(path).startsWith('.')
+/** one of Klip's blocks beside a clip (<spot>.<block>.<ext>): never a clip of its own */
+const isBlockFile = (path: string) => BLOCKS.some(block => withoutExtension(fileName(path)).toLowerCase().endsWith(`.${block}`))
+/** a clip in a listing: media, and not a block */
+export const isClip = (path: string) => isMedia(path) && !isBlockFile(path)
 
 /** A take's file relative to raw/ or edited/, without extension: "topdognix/vo/joe/problem/V01". */
 export const spotPath = (bundle: ShootBundle, item: BundleItem, beat: string | null): string => takeSpot(bundle, item, beat)
-
-/** The clip files at a spot in a listing (any extension). */
-const filesAt = (spot: string, files: string[]) =>
-  files.filter(file => isClip(file) && withoutExtension(file).toLowerCase() === spot.toLowerCase())
-
-/** The treatments Klip makes sidecars for: each one's sidecar name and the takes that get one. */
-export const shootSidecars = (bundle: ShootBundle) => (bundle.treatments ?? [])
-  .map(treatment => ({ name: treatment.name, slug: slugify(treatment.name), clips: sidecarClips(treatment) }))
-  .filter(treatment => treatment.clips.length)
-
-/** Which kind of take a spot is, for sidecars: a standalone VO's hook and CTA beats count as a hook and a CTA. */
-export function sidecarClipOf(item: BundleItem, beat: string | null): SidecarClip {
-  if (item.kind !== 'body') return item.kind
-  const name = beat ? parseTakeKey(beat).beat : ''
-  if (isStandalone(item) && name === STANDALONE_HOOK_BEAT) return 'hook'
-  if (isStandalone(item) && name === STANDALONE_CTA_BEAT) return 'cta'
-  return 'vo'
-}
-
-/** Is this file a treatment's sidecar (<clip>.<sidecar>.<ext>) rather than a clip of its own? */
-export function sidecarTest(bundle: ShootBundle) {
-  const slugs = new Set(shootSidecars(bundle).map(sidecar => sidecar.slug))
-  return (file: string) => {
-    const name = withoutExtension(file.slice(file.lastIndexOf('/') + 1))
-    return name.includes('.') && slugs.has(name.slice(name.lastIndexOf('.') + 1).toLowerCase())
-  }
-}
 
 /** Every take the shoot's filmed items need: one per item per beat (hooks and CTAs one). */
 export function expectedSpots(bundle: ShootBundle) {
   return bundle.items
     .filter(item => item.status === 'filmed')
-    .flatMap(item => itemBeats(item).map(beat => ({ item, beat, spot: spotPath(bundle, item, beat) })))
+    .flatMap(item => itemBeats(item).map(beat => ({ item, beat, spot: spotPath(bundle, item, beat), role: takeRole(item, beat) })))
 }
 
-// --- checking the editors' work ----------------------------------------------------
+/** The treatments Klip makes things for: those that are on, can be drawn, and need something. */
+export const shootIngredients = (bundle: ShootBundle) => (bundle.treatments ?? [])
+  .filter(isDrawable)
+  .map(treatment => ({ name: treatment.name, needs: treatmentIngredients(treatment) }))
+  .filter(treatment => treatment.needs.length)
+
+/** Does Klip's take have an ingredient (a block made, or text written)? */
+function indexHas(take: KlipTake, ingredient: Ingredient) {
+  if (isTextIngredient(ingredient)) return !!take.text?.[ingredient]
+  return !!take.files[ingredient]
+}
+
+// --- checking Klip's work ----------------------------------------------------------
 
 export interface EditsCheck {
   ok: boolean
   problems: string[]
+  /** things a person should look at; they never block going Live */
+  warnings: string[]
   rawClips: number
   editedClips: number
 }
 
 /**
- * Before a shoot goes Live: every filmed take is in raw/ and edited/, named by its
- * code (a VO beat by beat) and of the right kind; edited/ mirrors raw/ clip for clip, same
- * folders and names (extensions can differ, editors re-export); every edited clip's length can
- * be read; and nothing is still waiting on a phone. `durations` (edited path -> seconds) is
- * checked when given.
+ * Before a shoot goes Live (docs/contract.md §7): Klip's index is there, for this plan; every
+ * filmed take was edited, with its clip and captions in edited/; every treatment that's on has its
+ * ingredients for the takes it covers; every raw media file is accounted for; and nothing is still
+ * waiting on a phone. `index` is edited/_klip.json, parsed (null: not there), or an error reading it.
  */
 export function checkEdits(
   bundle: ShootBundle,
   raw: string[],
   edited: string[],
-  options: { onPhones?: number, durations?: Map<string, number | null> } = {}
+  index: KlipIndex | null | { error: string },
+  options: { onPhones?: number, planHash?: string } = {}
 ): EditsCheck {
   const problems: string[] = []
-  const sidecars = shootSidecars(bundle)
-  const isSidecar = sidecarTest(bundle)
-  const missingSidecars = new Map(sidecars.map(sidecar => [sidecar.name, [] as string[]]))
+  const warnings: string[] = []
   const person = (id: string) => bundle.people.find(p => p.id === id)?.name ?? 'someone'
   const channel = (id: string | null) => bundle.channels.find(c => c.id === id)?.name ?? 'no channel'
+  const list = (files: string[]) => files.slice(0, 6).join(', ') + (files.length > 6 ? `… (${files.length - 6} more)` : '')
+  const rawMedia = raw.filter(isMedia)
+  const done = (editedClips = 0) => ({ ok: !problems.length, problems, warnings, rawClips: rawMedia.length, editedClips })
   if (options.onPhones) problems.push(`${options.onPhones} clip${options.onPhones === 1 ? ' is' : 's are'} still on phones: upload them first`)
 
-  for (const { item, beat, spot } of expectedSpots(bundle)) {
+  if (!index) {
+    problems.push('Klip hasn\'t finished: there\'s no edited/_klip.json yet')
+    return done()
+  }
+  if ('error' in index) {
+    problems.push(index.error)
+    return done()
+  }
+  const expectedHash = options.planHash ?? planHash(bundle)
+  if (index.plan_hash !== expectedHash) problems.push('Klip worked from a different plan (the takes or treatments changed since): run Klip again')
+
+  const listed = new Set(edited.map(file => file.toLowerCase()))
+  const bySpot = new Map(index.takes.map(take => [take.spot.toLowerCase(), take]))
+  const treatments = shootIngredients(bundle)
+  const missing = new Map(treatments.map(treatment => [treatment.name, [] as string[]]))
+
+  for (const { item, beat, spot, role } of expectedSpots(bundle)) {
     const label = `${item.code}${beat ? ` ${takeLabel(beat)}` : ''} (${person(item.person_id)}, ${channel(item.channel_id)})`
-    // every take is filmed, VOs included (their sound plays over b-roll)
-    for (const [stage, files] of [['raw', raw], ['edited', edited]] as const) {
-      const found = filesAt(spot, files)
-      if (!found.length) problems.push(`${label}: no video file at ${stage}/${spot}`)
-      else if (found.length > 1) problems.push(`${label}: ${found.length} files at ${stage}/${spot}`)
-      else if (kindOfFile(found[0]!) !== 'video') problems.push(`${label}: ${stage}/${found[0]} should be a video`)
+    const take = bySpot.get(spot.toLowerCase())
+    if (!take) {
+      problems.push(`${label}: not edited yet (no take at ${spot})`)
+      continue
     }
-    // each treatment's treated copy, beside the edited take
-    const clip = sidecarClipOf(item, beat)
-    for (const sidecar of sidecars.filter(sidecar => sidecar.clips.includes(clip))) {
-      if (!filesAt(`${spot}.${sidecar.slug}`, edited).length) missingSidecars.get(sidecar.name)!.push(`${spot}.${sidecar.slug}`)
+    if (take.status === 'failed') {
+      problems.push(`${label}: Klip couldn't edit it${take.review.reasons.length ? ` (${take.review.reasons.join('; ')})` : ''}`)
+      continue
+    }
+    for (const block of ['clip', 'captions'] as const) {
+      const file = take.files[block]
+      if (!file) problems.push(`${label}: no ${block === 'clip' ? 'edited clip' : 'captions'} yet`)
+      else if (!listed.has(file.toLowerCase())) problems.push(`${label}: edited/${file} isn't in Dropbox`)
+    }
+    if (take.review.needed) warnings.push(`${label}: ${[...take.review.reasons, ...take.review.notes].join('; ') || 'worth a look'}`)
+    // each treatment's ingredients, on the takes it covers
+    for (const treatment of treatments) {
+      for (const need of treatment.needs.filter(need => need.roles.includes(role))) {
+        if (!indexHas(take, need.ingredient)) missing.get(treatment.name)!.push(`${spot} (${need.ingredient})`)
+        else if (!isTextIngredient(need.ingredient) && !listed.has(take.files[need.ingredient]!.toLowerCase())) {
+          missing.get(treatment.name)!.push(`${spot} (${need.ingredient} not in Dropbox)`)
+        }
+      }
     }
   }
-
-  // edited/ mirrors raw/: same clips, same places, same names
-  const key = (file: string) => withoutExtension(file).toLowerCase()
-  const rawKeys = new Map(raw.filter(isClip).map(file => [key(file), file]))
-  const editedKeys = new Map(edited.filter(file => isClip(file) && !isSidecar(file)).map(file => [key(file), file]))
-  const missing = [...rawKeys].filter(([k]) => !editedKeys.has(k)).map(([, file]) => file)
-  const extra = [...editedKeys].filter(([k]) => !rawKeys.has(k)).map(([, file]) => file)
-  const list = (files: string[]) => files.slice(0, 6).join(', ') + (files.length > 6 ? `… (${files.length - 6} more)` : '')
-  if (missing.length) problems.push(`Not in edited/ yet: ${list(missing)}`)
-  if (extra.length) problems.push(`In edited/ but not raw/ (renamed or misplaced?): ${list(extra)}`)
-  for (const [name, spots] of missingSidecars) {
-    if (spots.length) problems.push(`${name}: no treated copy of ${spots.length} clip${spots.length === 1 ? '' : 's'} (${list(spots)})`)
+  for (const [name, spots] of missing) {
+    if (spots.length) problems.push(`${name}: missing for ${spots.length} take${spots.length === 1 ? '' : 's'} (${list(spots)})`)
   }
 
-  if (options.durations) {
-    // a sidecar plays for its clip's length, so only the clips themselves are read
-    const unreadable = edited.filter(file => isClip(file) && !isSidecar(file)).filter(file => !options.durations!.get(file))
-    if (unreadable.length) problems.push(`Couldn't read the length of ${list(unreadable)} (use .mov or .mp4)`)
-  }
+  // every raw media file is accounted for: a take, b-roll, or something Klip set aside
+  const known = new Set([...index.takes.map(take => take.raw_file), ...index.broll.map(clip => clip.raw_file)].map(file => file.toLowerCase()))
+  const setAside = new Map(index.unknown.map(entry => [entry.raw_file.toLowerCase(), entry.reason]))
+  const waiting = rawMedia.filter(file => !known.has(file.toLowerCase()) && !setAside.has(file.toLowerCase()))
+  if (waiting.length) problems.push(`Not edited yet: ${list(waiting)}`)
+  const duplicates = index.unknown.filter(entry => entry.reason === 'duplicate').map(entry => entry.raw_file)
+  const noSpot = index.unknown.filter(entry => entry.reason === 'no spot').map(entry => entry.raw_file)
+  if (duplicates.length) problems.push(`More than one file at the same place in raw/, so Klip edited none of them: ${list(duplicates)}`)
+  if (noSpot.length) problems.push(`In raw/ but not where any take or b-roll goes (renamed or misplaced?): ${list(noSpot)}`)
+  const failedBroll = index.broll.filter(clip => clip.status === 'failed').map(clip => clip.raw_file)
+  if (failedBroll.length) problems.push(`Klip couldn't edit this b-roll: ${list(failedBroll)}`)
 
-  return { ok: !problems.length, problems, rawClips: rawKeys.size, editedClips: editedKeys.size }
+  return done(index.takes.filter(take => take.status === 'edited').length + index.broll.filter(clip => clip.status === 'edited').length)
 }
 
 // --- the manifest -----------------------------------------------------------------------
@@ -140,7 +155,7 @@ interface ClipBase {
    */
   file: string
   raw_file: string | null
-  /** seconds, read from the edited file */
+  /** seconds, from Klip's index */
   duration: number | null
 }
 
@@ -174,10 +189,12 @@ export interface TakeClip extends ClipBase {
   /** hooks, and a standalone VO's hook-beat wordings: the hook type */
   hook_type: string | null
   script: string
-  /** the captions next to it in edited/, if they're there */
-  caption: string | null
-  /** each treatment's treated copy beside it in edited/ (sidecar -> file), for the treatments that apply to it */
-  sidecars?: Record<string, string>
+  /** the take's role (docs/contract.md §3): hook, cta, or a VO beat */
+  role: TakeRole
+  /** its blocks beside `file` in edited/: captions, and what the shoot's treatments need (null: not filmed) */
+  blocks: TakeBlocks | null
+  /** text Klip wrote for treatments (a search query, placed text), when they need it */
+  text?: TakeText
 }
 
 export interface BrollClip extends ClipBase {
@@ -195,6 +212,8 @@ export type ManifestClip = TakeClip | BrollClip
 export interface Manifest {
   schema_version: number
   version: number
+  /** what Klip works from, hashed (docs/contract.md §7): Klip copies it into its index */
+  plan_hash?: string
   generated_at: string
   /** the plan: shoot, people, channels, formats, items and b-roll shots (shootsheet) */
   plan: ReturnType<typeof buildShootsheet>
@@ -207,42 +226,41 @@ export interface Manifest {
 }
 
 /**
- * The manifest for a shoot whose edits check out, from the edited/ and raw/ listings. `brollShots`
- * maps a b-roll clip's raw path to the shot it was added for (from the checklist's clip records).
+ * The manifest for a shoot whose edits check out, from Klip's index (edited/_klip.json).
+ * `brollShots` maps a b-roll clip's raw path to the shot it was added for (from the checklist's
+ * clip records).
  */
 export function buildManifest(
   bundle: ShootBundle,
-  edited: string[],
-  raw: string[],
-  durations: Map<string, number | null>,
+  index: KlipIndex,
   options: { version: number, generatedAt: string, brollShots?: Map<string, string>, overridden?: string[], wordsPerSecond?: number }
 ): Manifest {
   const clips: ManifestClip[] = []
   const personSlug = (id: string) => bundle.people.find(p => p.id === id)?.slug ?? 'unknown'
-  const isSidecar = sidecarTest(bundle)
-  const sidecars = shootSidecars(bundle)
-  const editedClips = edited.filter(file => isClip(file) && !isSidecar(file))
-  // the raw clip at the same place, under its own extension (editors re-export, so it can differ)
-  const rawByPlace = new Map(raw.filter(isClip).map(file => [withoutExtension(file).toLowerCase(), file]))
-  const rawOf = (file: string) => rawByPlace.get(withoutExtension(file).toLowerCase()) ?? null
+  const bySpot = new Map(index.takes.filter(take => take.status === 'edited' && take.files.clip).map(take => [take.spot.toLowerCase(), take]))
+  const treatments = (bundle.treatments ?? []).filter(isDrawable)
 
-  for (const { item, beat, spot } of expectedSpots(bundle)) {
-    const file = filesAt(spot, editedClips)[0]
-    if (!file) continue
+  for (const { item, beat, spot, role } of expectedSpots(bundle)) {
+    const indexed = bySpot.get(spot.toLowerCase())
+    if (!indexed) continue
     const script = resolveItemScript(bundle, item)
-    const caption = edited.find(other => other.toLowerCase() === `${withoutExtension(file)}.srt`.toLowerCase()) ?? null
     // a VO take: one wording of one beat
     const take = beat ? parseTakeKey(beat) : null
     const wording = take ? beatWordings(script.beats?.find(b => b.beat === take.beat) ?? { beat: take.beat, script: '' }).find(w => w.option === take.option) : null
-    const clip = sidecarClipOf(item, beat)
-    const treated = Object.fromEntries(sidecars
-      .filter(sidecar => sidecar.clips.includes(clip))
-      .flatMap((sidecar) => {
-        const found = filesAt(`${spot}.${sidecar.slug}`, edited)[0]
-        return found ? [[sidecar.slug, found]] : []
-      }))
+    // the blocks the shoot needs of this take: captions always, plus its treatments' blocks
+    const blocks: TakeBlocks = { captions: indexed.files.captions }
+    const text: TakeText = {}
+    for (const ingredient of ingredientsFor(treatments, role)) {
+      if (isTextIngredient(ingredient)) {
+        const written = indexed.text?.[ingredient]
+        if (written) Object.assign(text, { [ingredient]: written })
+      } else {
+        blocks[ingredient] = indexed.files[ingredient] ?? null
+      }
+    }
     clips.push({
       kind: item.kind === 'body' ? 'vo' : item.kind,
+      role,
       channel: channelFolder(bundle, item.channel_id),
       item_id: item.id,
       person: personSlug(item.person_id),
@@ -258,11 +276,11 @@ export function buildManifest(
       mode: item.cta_mode,
       hook_type: item.kind === 'hook' ? item.hook_type : wording?.hook_type ?? null,
       script: take ? wording?.script ?? '' : script.text ?? '',
-      file,
-      raw_file: rawOf(file),
-      caption,
-      duration: durations.get(file) ?? null,
-      ...(sidecars.length ? { sidecars: treated } : {})
+      file: indexed.files.clip!,
+      raw_file: indexed.raw_file,
+      blocks,
+      ...(Object.keys(text).length ? { text } : {}),
+      duration: indexed.duration ?? null
     })
   }
 
@@ -278,6 +296,7 @@ export function buildManifest(
       for (const wording of beatWordings(resolved)) {
         clips.push({
           kind: 'vo',
+          role: takeRole(item, beat.beat),
           channel: channelFolder(bundle, item.channel_id),
           item_id: item.id,
           person: personSlug(item.person_id),
@@ -295,32 +314,33 @@ export function buildManifest(
           script: wording.script,
           file: '',
           raw_file: null,
-          caption: null,
+          blocks: null,
           duration: estimateSeconds(wording.script, pace) + 1
         })
       }
     }
   }
 
-  // b-roll: every clip in each channel's b-roll folders, matched to its shot by name (editors
-  // keep the name, the extension can change). A clip in a feature folder (b-roll/<beat>/<feature>/)
-  // is for that feature; one directly in the beat folder is generic.
+  // b-roll: every clip Klip edited in each channel's b-roll folders (the folders are kept, only the
+  // extension changes), matched to its shot by its raw path. A clip in a feature folder
+  // (b-roll/<beat>/<feature>/) is for that feature; one directly in the beat folder is generic.
   const shots = new Map(bundle.broll.filter(shot => shot.id).map(shot => [shot.id!, shot]))
   const shotByName = new Map([...(options.brollShots ?? [])].map(([path, id]) => [withoutExtension(path).toLowerCase(), id]))
-  for (const file of editedClips) {
-    const match = file.match(/^([^/]+)\/b-roll\/([^/]+)\/(?:([^/]+)\/)?[^/]+$/)
+  for (const clip of index.broll) {
+    if (clip.status !== 'edited' || !clip.file) continue
+    const match = clip.file.match(/^([^/]+)\/b-roll\/([^/]+)\/(?:([^/]+)\/)?[^/]+$/)
     if (!match) continue
     const [, channel, section, feature] = match as unknown as [string, string, string, string | undefined]
-    const shotId = shotByName.get(withoutExtension(file).toLowerCase())
+    const shotId = shotByName.get(withoutExtension(clip.raw_file).toLowerCase())
     const shot = shotId ? shots.get(shotId) ?? null : null
     clips.push({
       kind: 'broll',
       channel,
       section,
       feature: feature ?? null,
-      file,
-      raw_file: rawOf(file),
-      duration: durations.get(file) ?? null,
+      file: clip.file,
+      raw_file: clip.raw_file,
+      duration: clip.duration ?? null,
       shot: shot ? { id: shot.id!, description: shot.description, beat: shot.beat, general: !shot.format_id } : null
     })
   }
@@ -328,6 +348,7 @@ export function buildManifest(
   return {
     schema_version: MANIFEST_SCHEMA_VERSION,
     version: options.version,
+    plan_hash: planHash(bundle),
     generated_at: options.generatedAt,
     plan: buildShootsheet(bundle),
     clips,

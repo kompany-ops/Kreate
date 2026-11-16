@@ -125,6 +125,8 @@ export const dropboxUploader: ClipUploader = {
 }
 
 // --- reading the shoot's folders (checking the edits) ----------------------------------
+// Kreate never inspects edited/ media: what Klip made, and how long it is, comes from its index
+// (edited/_klip.json, docs/contract.md).
 
 /** Every file under a folder (relative to the root), as paths relative to it, with sizes; none if it isn't there. */
 export async function dropboxListFiles(folder: string): Promise<{ path: string, size: number }[]> {
@@ -157,71 +159,18 @@ export async function dropboxListFiles(folder: string): Promise<{ path: string, 
   return files.sort((a, b) => a.path.localeCompare(b.path))
 }
 
-/** A slice of a file (relative to the root), by byte range. */
-async function readRange(path: string, start: number, end: number): Promise<DataView> {
+/** A small text file (relative to the root), such as Klip's index; null if it isn't there. */
+export async function dropboxReadText(path: string): Promise<string | null> {
   const { root } = await getAccess()
   return withRetries(async (token) => {
     const response = await fetch('https://content.dropboxapi.com/2/files/download', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Dropbox-API-Arg': asciiJson({ path: `${root}/${path}` }), 'Range': `bytes=${start}-${end - 1}` }
+      headers: { 'Authorization': `Bearer ${token}`, 'Dropbox-API-Arg': asciiJson({ path: `${root}/${path}` }) }
     })
-    if (!response.ok && response.status !== 206) throw new DropboxError(response.status, await response.text())
-    return new DataView(await response.arrayBuffer())
+    if (response.status === 409 && (await response.clone().text()).includes('not_found')) return null
+    if (!response.ok) throw new DropboxError(response.status, await response.text())
+    return response.text()
   })
-}
-
-const fourCC = (view: DataView, at: number) => String.fromCharCode(view.getUint8(at), view.getUint8(at + 1), view.getUint8(at + 2), view.getUint8(at + 3))
-const uint64 = (view: DataView, at: number) => view.getUint32(at) * 2 ** 32 + view.getUint32(at + 4)
-
-/**
- * A clip's length in seconds, read from the start of the file in Dropbox (relative to the root):
- * MP4 / MOV / M4A from the movie header (walking the top-level boxes to `moov`, wherever it is),
- * WAV from its header. Null when it can't be read.
- */
-export async function dropboxDuration(path: string, size: number): Promise<number | null> {
-  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-  try {
-    if (['mp4', 'mov', 'm4a', 'm4v'].includes(extension)) {
-      let offset = 0
-      for (let step = 0; step < 32 && offset + 8 <= size; step++) {
-        const head = await readRange(path, offset, Math.min(size, offset + 16))
-        let boxSize = head.getUint32(0)
-        const type = fourCC(head, 4)
-        if (boxSize === 1) boxSize = uint64(head, 8)
-        else if (boxSize === 0) boxSize = size - offset
-        if (type === 'moov') {
-          const moov = await readRange(path, offset, Math.min(size, offset + Math.min(boxSize, 8 * 1024 * 1024)))
-          for (let at = 8; at + 8 < moov.byteLength; at++) {
-            if (fourCC(moov, at) !== 'mvhd') continue
-            const content = at + 4
-            const version = moov.getUint8(content)
-            const timescale = version === 1 ? moov.getUint32(content + 20) : moov.getUint32(content + 12)
-            const duration = version === 1 ? uint64(moov, content + 24) : moov.getUint32(content + 16)
-            return timescale ? duration / timescale : null
-          }
-          return null
-        }
-        if (boxSize < 8) return null
-        offset += boxSize
-      }
-      return null
-    }
-    if (extension === 'wav') {
-      const header = await readRange(path, 0, Math.min(size, 64 * 1024))
-      let byteRate = 0
-      for (let at = 12; at + 8 <= header.byteLength;) {
-        const id = fourCC(header, at)
-        const chunk = header.getUint32(at + 4, true)
-        if (id === 'fmt ') byteRate = header.getUint32(at + 16, true)
-        if (id === 'data') return byteRate ? chunk / byteRate : null
-        at += 8 + chunk + (chunk % 2)
-      }
-      return null
-    }
-  } catch {
-    return null
-  }
-  return null
 }
 
 /** Create a folder (relative to the root); fine if it's already there. */

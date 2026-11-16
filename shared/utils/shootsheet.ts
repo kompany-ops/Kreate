@@ -4,8 +4,12 @@ import type { Beat, SlotContext } from './slots'
 import { beatWordings, buildSlotContext, channelSlotsIn, joinBeats, parseBeats, parseTakeKey, renderBeats, renderScript, slugify, takeKey } from './slots'
 import { parseSlotValues } from './orgProfile'
 import type { ItemKind } from './calculator'
+import { isDrawable, planHash } from './klip'
 
 /**
+ * 10: treatments drop `sidecar` and `applies_to`: Klip makes building blocks, and what each
+ * treatment needs follows from its `component` (docs/contract.md §5). Only treatments the renderer
+ * can draw are listed.
  * 9: each treatment says what Klip makes for it: `description` (what the AI writes its text
  * from), `sidecar` (the sidecar's name, or null for a layout) and `applies_to` (the clips that get
  * one: hook, vo, cta).
@@ -20,7 +24,7 @@ import type { ItemKind } from './calculator'
  * `broll_variations`, now used). 3: b-roll shots no
  * longer carry product_visible or min_clips. 2: custom slot values moved to plan.shoot.
  */
-export const SHOOTSHEET_SCHEMA_VERSION = 9
+export const SHOOTSHEET_SCHEMA_VERSION = 10
 export const DEFAULT_BEATS = ['problem', 'product', 'result']
 
 export interface BundleChannel {
@@ -157,28 +161,6 @@ export interface BundleTreatment {
   settings: unknown
   /** a curated combination: the treatments it's made of (each drawn on its own part of the video) */
   parts?: BundleTreatment[]
-}
-
-export type SidecarClip = 'hook' | 'vo' | 'cta'
-
-/**
- * The takes Klip makes a treated copy (a sidecar) of for a treatment: a hook treatment the
- * hooks (and a standalone VO's hook beat), a CTA treatment the CTAs, a video treatment every take,
- * and footage that needs the speaker (greenscreen, picture-in-picture) the VO takes. A layout only
- * chooses which footage plays, so it needs none; a combination needs one wherever any other part
- * applies, carrying every part that fits there.
- */
-export function sidecarClips(treatment: Pick<BundleTreatment, 'kind' | 'placement' | 'needs' | 'parts'>): SidecarClip[] {
-  const parts = treatment.parts?.length ? treatment.parts : [treatment]
-  const clips = new Set<SidecarClip>()
-  for (const part of parts) {
-    if (part.kind === 'layout') continue
-    if (part.kind === 'footage' && part.needs.includes('speaker_video')) clips.add('vo')
-    else if (part.placement === 'hook') clips.add('hook')
-    else if (part.placement === 'cta') clips.add('cta')
-    else for (const clip of ['hook', 'vo', 'cta'] as const) clips.add(clip)
-  }
-  return (['hook', 'vo', 'cta'] as const).filter(clip => clips.has(clip))
 }
 
 export interface ShootBundle {
@@ -638,20 +620,18 @@ export function buildShootsheet(bundle: ShootBundle) {
       }
       return { ...base, cta_mode: item.cta_mode, script: script.text ?? '', ...folders }
     }),
-    // the treatments that are on: recipes get a version for each one that applies (§12b)
-    treatments: (bundle.treatments ?? []).map(treatment => ({
+    // the treatments that are on and can be drawn: recipes get a version for each one that applies
+    // (§12b). Klip makes what each needs from its component (docs/contract.md §5).
+    treatments: (bundle.treatments ?? []).filter(isDrawable).map(treatment => ({
       slug: slugify(treatment.name),
       name: treatment.name,
       description: treatment.description ?? null,
-      // Klip makes a treated copy of every clip it applies to, beside the clip: <clip>.<sidecar>.<ext>
-      sidecar: sidecarClips(treatment).length ? slugify(treatment.name) : null,
-      applies_to: sidecarClips(treatment),
       kind: treatment.kind,
       placement: treatment.placement,
       needs: treatment.needs,
       component: treatment.component,
       settings: treatment.settings ?? {},
-      // a combination's parts, each as Showdog draws it
+      // a combination's parts, each as the renderer draws it
       parts: (treatment.parts ?? []).map(part => ({
         slug: slugify(part.name),
         name: part.name,
@@ -748,6 +728,10 @@ export function skeletonFolders(bundle: ShootBundle): string[] {
 }
 
 /**
+ * 11: the manifest carries `plan_hash` (what Klip works from, hashed); take clips carry `role`,
+ * `blocks` (captions and what treatments need, replacing `caption` and `sidecars`) and `text` (what
+ * Klip wrote for treatments), with lengths from Klip's index; the plan follows shoot sheet 10
+ * (docs/contract.md §7).
  * 10: take clips carry `sidecars` (treatment sidecar -> its file beside the clip in edited/); the
  * plan follows shoot sheet 9.
  * 9: a VO beat shown on screen is a clip with no file (`file` ''), its text in `script` and its
@@ -761,14 +745,14 @@ export function skeletonFolders(bundle: ShootBundle): string[] {
  * longer carry product_visible. 3: clips carry `feature` (VOs the feature they're about, b-roll its
  * feature folder or null).
  */
-export const MANIFEST_SCHEMA_VERSION = 10
+export const MANIFEST_SCHEMA_VERSION = 11
 
 /**
  * The manifest before the edits are in (spec §14): just the plan, version 0, no clips. Written
  * when the shoot is planned and again when editing starts (for Klip); going Live replaces it with the full one.
  */
 export function planManifest(bundle: ShootBundle) {
-  return { schema_version: MANIFEST_SCHEMA_VERSION, version: 0, generated_at: null, plan: buildShootsheet(bundle), clips: [] }
+  return { schema_version: MANIFEST_SCHEMA_VERSION, version: 0, plan_hash: planHash(bundle), generated_at: null, plan: buildShootsheet(bundle), clips: [] }
 }
 
 /** Files in the skeleton zip: a `.keep` per folder plus the plan's manifest.json in the shoot folder. */
