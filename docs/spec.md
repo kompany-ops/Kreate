@@ -192,9 +192,9 @@ All tables get `id uuid pk default gen_random_uuid()`, `created_at`, `updated_at
 ### Brands
 
 **brands**
-- `name text`, `slug text unique`, `status text check (status in ('prospect','auditioning','piloting','active','paused'))` (piloting: the first sample video is in, to keep the sample rate up, before it's active), `notes text`
-- Trybe deal: `trybe_url text`, `currency text default 'GBP'` (ISO code), `trybe_score numeric`
-- Income: `pay_types text[]`, any of `flat` (`flat_fee`, per approved video), `retainer` (`retainer_fee`, per month), `commission` (`commission_pct`, % of sales) and `ad_spend` (`ad_spend_pct`, % of the brand's ad spend on our videos). An amount is kept only while its type is ticked; no types means not agreed yet. Scrybe imports map their pay figures and labels to these types.
+- `name text`, `slug text unique`, `status text check (status in ('prospect','auditioning','piloting','active','paused'))` (piloting: the first sample video is in, to keep the sample rate up, before it's active)
+- Trybe deal: `trybe_url text`, `trybe_score numeric` (the marketplace's listing, not the account's terms)
+- **The deal** lives in **brand_deals** (one per brand, the team's only: cast and guests never read it): `pay_types text[]`, any of `flat` (`flat_fee`, per approved video), `retainer` (`retainer_fee`, per month), `commission` (`commission_pct`, % of sales) and `ad_spend` (`ad_spend_pct`, % of the brand's ad spend on our videos), `currency` (ISO code, default GBP), and `notes`. An amount is kept only while its type is ticked; no types means not agreed yet. Scrybe imports map their pay figures and labels to these types. A brand shared to chat previews its public `about`, never the notes.
 - `starred boolean` marks the particularly good brands: a star on every brand card, row and page, and a Starred filter on Brands.
 - `archived_at timestamptz`: archiving hides a brand from Brands (except the Archived status filter) and its products from the pickers for new shoots, hooks and CTAs. Its shoots, products and filmed work stay; Restore on the brand page brings it back. Nothing deletes a brand.
 - Import: `trybe_brand_id text`, `trybe_data jsonb` — everything else from the Scrybe export (about text, category, website, earnings, top formats, unrecognised columns under `extra`)

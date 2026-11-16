@@ -36,8 +36,9 @@ type DealRow = {
   currency: string
 }
 
-/** "£150 / video + £2,000 / month + 10% commission + 8% of ad spend", or null when no terms are set. */
-export function dealSummary(brand: DealRow): string | null {
+/** "£150 / video + £2,000 / month + 10% commission + 8% of ad spend", or null when no terms are set (or no deal row). */
+export function dealSummary(brand: DealRow | null | undefined): string | null {
+  if (!brand) return null
   const money = (amount: number | null, per: string) => amount === null ? null : `${formatMoney(Number(amount), brand.currency)} / ${per}`
   const pct = (amount: number | null, of: string) => amount === null ? null : `${Number(amount)}% ${of}`
   const amounts: Record<PayType, string | null> = {
@@ -51,33 +52,43 @@ export function dealSummary(brand: DealRow): string | null {
   return parts.length ? parts.join(' + ') : null
 }
 
-/** Form state for BrandDealFields from a brand row (or blank for a new brand). */
-export function toBrandDeal(brand?: DealRow & { trybe_score: number | null, trybe_url: string | null }) {
+/**
+ * Form state for BrandDealFields from a brand's deal (brand_deals: the team's only) and its Trybe
+ * fields (on brands), or blank for a new brand.
+ */
+export function toBrandDeal(deal?: DealRow | null, brand?: { trybe_score: number | null, trybe_url: string | null } | null) {
   return {
-    pay_types: [...(brand?.pay_types ?? [])],
-    flat_fee: brand?.flat_fee ?? undefined,
-    retainer_fee: brand?.retainer_fee ?? undefined,
-    commission_pct: brand?.commission_pct ?? undefined,
-    ad_spend_pct: brand?.ad_spend_pct ?? undefined,
-    currency: brand?.currency ?? 'GBP',
+    pay_types: [...(deal?.pay_types ?? [])],
+    flat_fee: deal?.flat_fee ?? undefined,
+    retainer_fee: deal?.retainer_fee ?? undefined,
+    commission_pct: deal?.commission_pct ?? undefined,
+    ad_spend_pct: deal?.ad_spend_pct ?? undefined,
+    currency: deal?.currency ?? 'GBP',
     trybe_score: brand?.trybe_score ?? undefined,
     trybe_url: brand?.trybe_url ?? ''
   }
 }
 
-/** Column values to save from BrandDealFields. Amounts for income types that aren't ticked are cleared. */
+/**
+ * What to save from BrandDealFields: `deal` for brand_deals, `brand` (the Trybe fields) for brands.
+ * Amounts for income types that aren't ticked are cleared.
+ */
 export function fromBrandDeal(deal: ReturnType<typeof toBrandDeal>) {
   const number = (value: number | undefined | string) => value === undefined || value === '' || Number.isNaN(Number(value)) ? null : Number(value)
   return {
-    ...payColumns(deal.pay_types, {
-      flat_fee: number(deal.flat_fee),
-      retainer_fee: number(deal.retainer_fee),
-      commission_pct: number(deal.commission_pct),
-      ad_spend_pct: number(deal.ad_spend_pct)
-    }),
-    currency: deal.currency,
-    trybe_score: number(deal.trybe_score),
-    trybe_url: normalizeUrl(deal.trybe_url)
+    deal: {
+      ...payColumns(deal.pay_types, {
+        flat_fee: number(deal.flat_fee),
+        retainer_fee: number(deal.retainer_fee),
+        commission_pct: number(deal.commission_pct),
+        ad_spend_pct: number(deal.ad_spend_pct)
+      }),
+      currency: deal.currency
+    },
+    brand: {
+      trybe_score: number(deal.trybe_score),
+      trybe_url: normalizeUrl(deal.trybe_url)
+    }
   }
 }
 

@@ -312,26 +312,76 @@ export type Database = {
           },
         ]
       }
+      brand_deals: {
+        Row: {
+          ad_spend_pct: number | null
+          brand_id: string
+          commission_pct: number | null
+          created_at: string
+          currency: string
+          flat_fee: number | null
+          notes: string | null
+          org_id: string
+          pay_types: string[]
+          retainer_fee: number | null
+          updated_at: string
+        }
+        Insert: {
+          ad_spend_pct?: number | null
+          brand_id: string
+          commission_pct?: number | null
+          created_at?: string
+          currency?: string
+          flat_fee?: number | null
+          notes?: string | null
+          org_id?: string
+          pay_types?: string[]
+          retainer_fee?: number | null
+          updated_at?: string
+        }
+        Update: {
+          ad_spend_pct?: number | null
+          brand_id?: string
+          commission_pct?: number | null
+          created_at?: string
+          currency?: string
+          flat_fee?: number | null
+          notes?: string | null
+          org_id?: string
+          pay_types?: string[]
+          retainer_fee?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_deals_org_id_brand_id_fkey"
+            columns: ["org_id", "brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
+            foreignKeyName: "brand_deals_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       brands: {
         Row: {
           about: string | null
-          ad_spend_pct: number | null
           archived_at: string | null
-          commission_pct: number | null
           created_at: string
           created_by: string | null
-          currency: string
-          flat_fee: number | null
           guidelines: string | null
           id: string
           library_rule: string
           logo_url: string | null
           name: string
-          notes: string | null
           org_id: string
           partner_org_id: string | null
-          pay_types: string[]
-          retainer_fee: number | null
           slug: string
           source_brand_id: string | null
           starred: boolean
@@ -346,23 +396,16 @@ export type Database = {
         }
         Insert: {
           about?: string | null
-          ad_spend_pct?: number | null
           archived_at?: string | null
-          commission_pct?: number | null
           created_at?: string
           created_by?: string | null
-          currency?: string
-          flat_fee?: number | null
           guidelines?: string | null
           id?: string
           library_rule?: string
           logo_url?: string | null
           name: string
-          notes?: string | null
           org_id?: string
           partner_org_id?: string | null
-          pay_types?: string[]
-          retainer_fee?: number | null
           slug: string
           source_brand_id?: string | null
           starred?: boolean
@@ -377,23 +420,16 @@ export type Database = {
         }
         Update: {
           about?: string | null
-          ad_spend_pct?: number | null
           archived_at?: string | null
-          commission_pct?: number | null
           created_at?: string
           created_by?: string | null
-          currency?: string
-          flat_fee?: number | null
           guidelines?: string | null
           id?: string
           library_rule?: string
           logo_url?: string | null
           name?: string
-          notes?: string | null
           org_id?: string
           partner_org_id?: string | null
-          pay_types?: string[]
-          retainer_fee?: number | null
           slug?: string
           source_brand_id?: string | null
           starred?: boolean

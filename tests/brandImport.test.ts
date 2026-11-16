@@ -184,16 +184,20 @@ describe('planImport', () => {
     const plan = planImport(imported, existing)
     expect(plan.updates.map(update => [update.id, update.brand.name])).toEqual([['b2', 'Split Pay'], ['b1', 'PawCo']])
     expect(plan.creates.map(brand => [brand.name, brand.slug])).toEqual([['Calming Co', 'calming-co-2'], ['Calming Co!', 'calming-co-3']])
-    expect(createFields(plan.creates[0]!)).toMatchObject({ status: 'prospect', slug: 'calming-co-2', currency: 'USD' })
+    // the brand, and its deal (the team's only) apart from it
+    expect(createFields(plan.creates[0]!)).toMatchObject({ brand: { status: 'prospect', slug: 'calming-co-2' }, deal: { currency: 'USD' } })
+    expect(createFields(plan.creates[0]!).brand).not.toHaveProperty('pay_types')
   })
 
   it('refreshes Trybe fields on existing brands without blanking values Scrybe could not read', () => {
     const plan = planImport(imported, existing)
     const pawco = plan.updates.find(update => update.id === 'b1')!
-    const fields = updateFields(pawco.brand)
+    const { brand: fields, deal } = updateFields(pawco.brand)
     expect(fields).toMatchObject({ trybe_url: 'https://trybe.example/creator/discover?brand=abc', trybe_brand_id: 'abc', trybe_score: 90 })
     expect(fields).not.toHaveProperty('pay_types')
     expect(fields).not.toHaveProperty('name')
     expect(fields).not.toHaveProperty('status')
+    // Scrybe couldn't read how PawCo pays: its deal is left as it is
+    expect(deal).toBeNull()
   })
 })

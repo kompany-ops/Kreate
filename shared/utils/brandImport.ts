@@ -396,38 +396,47 @@ export function planImport(brands: ImportedBrand[], existing: ExistingBrand[]): 
   return plan
 }
 
-/** Columns written for a new prospect. */
+/** What's written for a new prospect: the brand, and its deal (brand_deals, the team's only). */
 export function createFields(brand: ImportedBrand & { slug: string }) {
   return {
-    name: brand.name,
-    slug: brand.slug,
-    status: 'prospect',
-    trybe_url: brand.trybe_url,
-    trybe_brand_id: brand.trybe_brand_id,
-    pay_types: brand.pay_types,
-    flat_fee: brand.flat_fee,
-    retainer_fee: brand.retainer_fee,
-    commission_pct: brand.commission_pct,
-    ad_spend_pct: brand.ad_spend_pct,
-    currency: brand.currency,
-    trybe_score: brand.trybe_score,
-    trybe_data: brand.trybe_data
+    brand: {
+      name: brand.name,
+      slug: brand.slug,
+      status: 'prospect',
+      trybe_url: brand.trybe_url,
+      trybe_brand_id: brand.trybe_brand_id,
+      trybe_score: brand.trybe_score,
+      trybe_data: brand.trybe_data
+    },
+    deal: {
+      pay_types: brand.pay_types,
+      flat_fee: brand.flat_fee,
+      retainer_fee: brand.retainer_fee,
+      commission_pct: brand.commission_pct,
+      ad_spend_pct: brand.ad_spend_pct,
+      currency: brand.currency
+    }
   }
 }
 
-/** Columns refreshed on an existing brand. Values Scrybe couldn't read never blank out what's there. */
+/**
+ * What's refreshed on an existing brand: its own columns, and its deal when Scrybe read how it pays
+ * (null: leave the deal as it is). Values Scrybe couldn't read never blank out what's there.
+ */
 export function updateFields(brand: ImportedBrand) {
   const fields: Record<string, unknown> = { trybe_data: brand.trybe_data }
   if (brand.trybe_url) fields.trybe_url = brand.trybe_url
   if (brand.trybe_brand_id) fields.trybe_brand_id = brand.trybe_brand_id
   if (brand.trybe_score !== null) fields.trybe_score = brand.trybe_score
-  if (brand.pay_types.length) {
-    fields.pay_types = brand.pay_types
-    fields.currency = brand.currency
-    fields.flat_fee = brand.flat_fee
-    fields.retainer_fee = brand.retainer_fee
-    fields.commission_pct = brand.commission_pct
-    fields.ad_spend_pct = brand.ad_spend_pct
-  }
-  return fields
+  const deal = brand.pay_types.length
+    ? {
+        pay_types: brand.pay_types,
+        currency: brand.currency,
+        flat_fee: brand.flat_fee,
+        retainer_fee: brand.retainer_fee,
+        commission_pct: brand.commission_pct,
+        ad_spend_pct: brand.ad_spend_pct
+      }
+    : null
+  return { brand: fields, deal }
 }

@@ -55,15 +55,21 @@ async function runImport() {
   try {
     const { creates, updates } = plan.value
     for (let i = 0; i < creates.length; i += 100) {
-      const batch = creates.slice(i, i + 100).map(brand => createFields(brand) as unknown as Insert<'brands'>)
-      must(await db.from('brands').insert(batch))
-      progress.value += batch.length
+      const fields = creates.slice(i, i + 100).map(brand => createFields(brand))
+      const made = must(await db.from('brands').insert(fields.map(field => field.brand as unknown as Insert<'brands'>)).select('id, slug'))
+      // each new brand's deal, matched by its slug
+      const bySlug = new Map(made.map(row => [row.slug, row.id]))
+      must(await db.from('brand_deals').insert(fields.map(field => ({ brand_id: bySlug.get(field.brand.slug)!, ...field.deal })) as Insert<'brand_deals'>[]))
+      progress.value += fields.length
     }
     for (let i = 0; i < updates.length; i += 10) {
       const batch = updates.slice(i, i + 10)
-      const results = await Promise.all(batch.map(update =>
-        db.from('brands').update(updateFields(update.brand) as Update<'brands'>).eq('id', update.id)
-      ))
+      const results = await Promise.all(batch.map(async (update) => {
+        const fields = updateFields(update.brand)
+        const updated = await db.from('brands').update(fields.brand as Update<'brands'>).eq('id', update.id)
+        if (updated.error || !fields.deal) return updated
+        return db.from('brand_deals').upsert({ brand_id: update.id, ...fields.deal } as Insert<'brand_deals'>)
+      }))
       results.forEach(must)
       progress.value += batch.length
     }

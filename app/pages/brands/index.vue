@@ -4,6 +4,8 @@ import type { Row } from '#shared/types/models'
 type BrandRow = Row<'brands'> & {
   brand_channels: { channel_id: string }[]
   products: { id: string }[]
+  /** how it pays this account: the team's only (null: no terms yet) */
+  deal: Row<'brand_deals'> | null
 }
 
 const db = useDb()
@@ -41,10 +43,11 @@ async function loadBrands() {
   for (let from = 0; ; from += 1000) {
     const page = must(await db
       .from('brands')
-      .select('*, brand_channels(channel_id), products(id)')
+      .select('*, brand_channels(channel_id), products(id), deal:brand_deals(*)')
       .order('name')
-      .range(from, from + 999)) as BrandRow[]
-    all.push(...page)
+      .range(from, from + 999))
+    // one deal per brand, which the Data API returns as a list (it's linked by account and brand)
+    all.push(...page.map(row => ({ ...row, deal: (Array.isArray(row.deal) ? row.deal[0] : row.deal) ?? null }) as unknown as BrandRow))
     if (page.length < 1000) break
   }
   brands.value = all
@@ -175,9 +178,9 @@ const filtered = computed(() => {
       && (!filters.starred || brand.starred)
       && (!term || brand.name.toLowerCase().includes(term))
       && (!filters.minScore || (brand.trybe_score !== null && Number(brand.trybe_score) >= filters.minScore))
-      && (filters.payType === 'all' || (filters.payType === 'none' ? !brand.pay_types.length : brand.pay_types.includes(filters.payType)))
-      && (!filters.minCommission || (brand.commission_pct !== null && Number(brand.commission_pct) >= filters.minCommission))
-      && (!filters.minFlat || (brand.flat_fee !== null && Number(brand.flat_fee) >= filters.minFlat))
+      && (filters.payType === 'all' || (filters.payType === 'none' ? !brand.deal?.pay_types.length : !!brand.deal?.pay_types.includes(filters.payType)))
+      && (!filters.minCommission || (brand.deal?.commission_pct != null && Number(brand.deal.commission_pct) >= filters.minCommission))
+      && (!filters.minFlat || (brand.deal?.flat_fee != null && Number(brand.deal.flat_fee) >= filters.minFlat))
       && (filters.category === 'all' || (data.categories ?? []).includes(filters.category))
       && (filters.channel === 'all' || (filters.channel === 'none'
         ? !brand.brand_channels.length
@@ -191,10 +194,10 @@ const filtered = computed(() => {
   const sorters: Record<string, (a: BrandRow, b: BrandRow) => number> = {
     name: (a, b) => a.name.localeCompare(b.name),
     score: desc(brand => brand.trybe_score === null ? null : Number(brand.trybe_score)),
-    commission: desc(brand => brand.commission_pct === null ? null : Number(brand.commission_pct)),
-    flat: desc(brand => brand.flat_fee === null ? null : Number(brand.flat_fee)),
-    retainer: desc(brand => brand.retainer_fee === null ? null : Number(brand.retainer_fee)),
-    ad_spend: desc(brand => brand.ad_spend_pct === null ? null : Number(brand.ad_spend_pct)),
+    commission: desc(brand => brand.deal?.commission_pct == null ? null : Number(brand.deal.commission_pct)),
+    flat: desc(brand => brand.deal?.flat_fee == null ? null : Number(brand.deal.flat_fee)),
+    retainer: desc(brand => brand.deal?.retainer_fee == null ? null : Number(brand.deal.retainer_fee)),
+    ad_spend: desc(brand => brand.deal?.ad_spend_pct == null ? null : Number(brand.deal.ad_spend_pct)),
     newest: (a, b) => b.created_at.localeCompare(a.created_at)
   }
   return list.sort(sorters[sort.value] ?? sorters.name)
@@ -288,7 +291,9 @@ function create() {
 async function save() {
   saving.value = true
   await run(async () => {
-    const brand = mustOne(await db.from('brands').insert({ name: draft.name.trim(), slug: draft.slug, status: draft.status, ...fromBrandDeal(deal.value) }).select('*').single())
+    const fields = fromBrandDeal(deal.value)
+    const brand = mustOne(await db.from('brands').insert({ name: draft.name.trim(), slug: draft.slug, status: draft.status, ...fields.brand }).select('*').single())
+    must(await db.from('brand_deals').insert({ brand_id: brand.id, ...fields.deal }))
     open.value = false
     await navigateTo(`/brands/${brand.id}`)
   })
@@ -463,8 +468,8 @@ async function save() {
           </div>
           <p class="mt-1 text-sm text-muted">
             {{ brand.products.length }} product{{ brand.products.length === 1 ? '' : 's' }}
-            <template v-if="dealSummary(brand)">
-              · {{ dealSummary(brand) }}
+            <template v-if="dealSummary(brand.deal)">
+              · {{ dealSummary(brand.deal) }}
             </template>
             <template v-if="brand.trybe_score !== null">
               · Trybe score {{ Number(brand.trybe_score) }}
@@ -540,7 +545,7 @@ async function save() {
                 <UBadge v-else :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
               </td>
               <td class="px-3 py-2 text-muted">
-                {{ dealSummary(brand) ?? '–' }}
+                {{ dealSummary(brand.deal) ?? '–' }}
               </td>
               <td class="px-3 py-2 text-right text-muted tabular-nums">
                 {{ brand.trybe_score === null ? '–' : Number(brand.trybe_score) }}
@@ -600,8 +605,8 @@ async function save() {
               </div>
               <p class="mt-1 text-xs text-muted">
                 {{ brand.products.length }} product{{ brand.products.length === 1 ? '' : 's' }}
-                <template v-if="dealSummary(brand)">
-                  · {{ dealSummary(brand) }}
+                <template v-if="dealSummary(brand.deal)">
+                  · {{ dealSummary(brand.deal) }}
                 </template>
                 <template v-if="brand.trybe_score !== null">
                   · score {{ Number(brand.trybe_score) }}

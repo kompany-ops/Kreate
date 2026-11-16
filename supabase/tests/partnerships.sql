@@ -109,9 +109,10 @@ begin
   exception when raise_exception then
     if sqlerrm like 'FAILED%' then raise; end if;
   end;
-  update public.brands set status = 'piloting', notes = 'Great so far', starred = true, pay_types = array['flat'], flat_fee = 50 where id = linked;
+  update public.brands set status = 'piloting', starred = true where id = linked;
   get diagnostics n = row_count;
-  if n <> 1 then raise exception 'FAILED: the creator couldn''t keep their deal'; end if;
+  if n <> 1 then raise exception 'FAILED: the creator couldn''t keep their status and star'; end if;
+  insert into public.brand_deals (brand_id, pay_types, flat_fee, notes) values (linked, array['flat'], 50, 'Great so far');
 
   -- brand_only: the brand's shoots take only its hooks
   perform set_config('request.jwt.claims', be_brand, true);

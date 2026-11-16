@@ -175,14 +175,14 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
     annotations: { readOnlyHint: true }
   }, guarded(async ({ status, starred, archived }: { status?: string, starred?: boolean, archived?: boolean, organisation?: string }, _org, db) => {
     let query = db.from('brands')
-      .select('id, name, status, starred, archived_at, notes, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct, currency, trybe_url, trybe_score, brand_channels(channel:channels(name)), products(id, name, claims_allowed, claims_forbidden, product_features(id, name, description))')
+      .select('id, name, status, starred, archived_at, trybe_url, trybe_score, deal:brand_deals(notes, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct, currency), brand_channels(channel:channels(name)), products(id, name, claims_allowed, claims_forbidden, product_features(id, name, description))')
       .order('name')
     query = archived ? query.not('archived_at', 'is', null) : query.is('archived_at', null)
     if (status) query = query.eq('status', status)
     if (starred) query = query.eq('starred', true)
-    return text((must(await query) ?? []).map(({ brand_channels, pay_types, ...brand }) => ({
+    return text((must(await query) ?? []).map(({ brand_channels, deal, ...brand }) => ({
       ...brand,
-      income: pay_types,
+      ...flatDeal(deal),
       channels: brand_channels.map(row => (row.channel as { name: string } | null)?.name).filter(Boolean),
       link: link(paths.brand(brand.id)),
       products: brand.products.map(product => ({ ...product, link: link(paths.product(brand.id, product.id)) }))
@@ -516,23 +516,37 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
     trybe_score?: number | null, starred?: boolean, channels?: string[], organisation?: string
   }
 
-  /** Columns to write from brand inputs; income merges onto what the brand already has. */
+  type DealFields = PayAmounts & { pay_types: string[], currency: string, notes: string | null }
+  /** A brand's deal (brand_deals: the team's only) as the tools show it: income, amounts, currency, notes. */
+  const flatDeal = (deal: unknown) => {
+    const row = (Array.isArray(deal) ? deal[0] : deal) as Partial<DealFields> | null | undefined
+    return {
+      income: row?.pay_types ?? [], flat_fee: row?.flat_fee ?? null, retainer_fee: row?.retainer_fee ?? null,
+      commission_pct: row?.commission_pct ?? null, ad_spend_pct: row?.ad_spend_pct ?? null, currency: row?.currency ?? 'GBP', notes: row?.notes ?? null
+    }
+  }
+
+  /**
+   * What to write from brand inputs: `brand` columns, and `deal` columns for brand_deals (income
+   * merges onto what the deal already has).
+   */
   function brandColumns(input: BrandInput, current: PayAmounts & { pay_types: string[] }) {
-    const columns: Record<string, unknown> = {}
-    if (input.status !== undefined) columns.status = input.status
-    if (input.notes !== undefined) columns.notes = input.notes?.trim() || null
-    if (input.currency !== undefined) columns.currency = input.currency
-    if (input.trybe_url !== undefined) columns.trybe_url = input.trybe_url
-    if (input.trybe_score !== undefined) columns.trybe_score = input.trybe_score
-    if (input.starred !== undefined) columns.starred = input.starred
+    const brand: Record<string, unknown> = {}
+    const deal: Record<string, unknown> = {}
+    if (input.status !== undefined) brand.status = input.status
+    if (input.trybe_url !== undefined) brand.trybe_url = input.trybe_url
+    if (input.trybe_score !== undefined) brand.trybe_score = input.trybe_score
+    if (input.starred !== undefined) brand.starred = input.starred
+    if (input.notes !== undefined) deal.notes = input.notes?.trim() || null
+    if (input.currency !== undefined) deal.currency = input.currency
     const incomeTouched = input.income !== undefined
       || [input.flat_fee, input.retainer_fee, input.commission_pct, input.ad_spend_pct].some(value => value !== undefined)
     if (incomeTouched) {
-      Object.assign(columns, mergeIncome(current, {
+      Object.assign(deal, mergeIncome(current, {
         types: input.income, flat_fee: input.flat_fee, retainer_fee: input.retainer_fee, commission_pct: input.commission_pct, ad_spend_pct: input.ad_spend_pct
       }))
     }
-    return columns
+    return { brand, deal }
   }
 
   /** Set a brand's channels by name; names that aren't channels are reported back. */
@@ -548,10 +562,10 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
 
   async function brandSummary(db: Db, id: string) {
     const row = must(await db.from('brands')
-      .select('id, name, status, starred, archived_at, notes, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct, currency, trybe_url, trybe_score')
+      .select('id, name, status, starred, archived_at, trybe_url, trybe_score, deal:brand_deals(notes, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct, currency)')
       .eq('id', id).single())!
-    const { pay_types, ...rest } = row
-    return { ...rest, income: pay_types, link: link(paths.brand(id)) }
+    const { deal, ...rest } = row
+    return { ...rest, ...flatDeal(deal), link: link(paths.brand(id)) }
   }
 
   server.registerTool('add_brand', {
@@ -566,12 +580,14 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
   }, guarded(async (input: BrandInput & { name: string }, org, db) => {
     const existing = must(await db.from('brands').select('id, name, archived_at').ilike('name', input.name.trim()).maybeSingle())
     if (existing) return failure(`${existing.name} is already here${existing.archived_at ? ' (archived: restore it with update_brand)' : ''}: ${link(paths.brand(existing.id))}`)
+    const columns = brandColumns(input, { pay_types: [] })
     const brand = must(await db.from('brands').insert({
-      ...brandColumns(input, { pay_types: [] }),
+      ...columns.brand,
       name: input.name.trim(),
       slug: await freeSlug(db, 'brands', input.name),
       status: input.status ?? 'prospect'
     } as Insert<'brands'>).select('id').single())!
+    if (Object.keys(columns.deal).length) must(await db.from('brand_deals').insert({ brand_id: brand.id, ...columns.deal } as Insert<'brand_deals'>))
     const channels = input.channels ? await setBrandChannels(db, brand.id, input.channels) : {}
     return text({ added: 'brand', organisation: org.name, ...await brandSummary(db, brand.id), ...channels })
   }))
@@ -589,18 +605,20 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
     annotations: { readOnlyHint: false, destructiveHint: false }
   }, guarded(async (input: BrandInput & { brand_id: string, name?: string, archived?: boolean }, org, db) => {
     const current = must(await db.from('brands')
-      .select('id, name, archived_at, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct')
+      .select('id, name, archived_at, deal:brand_deals(notes, pay_types, flat_fee, retainer_fee, commission_pct, ad_spend_pct, currency)')
       .eq('id', input.brand_id).maybeSingle())
     if (!current) return failure('That brand isn\'t in this organisation. Use an id from list_brands.')
-    const columns = brandColumns(input, current)
-    if (input.name?.trim()) columns.name = input.name.trim()
-    if (input.archived !== undefined) columns.archived_at = input.archived ? (current.archived_at ?? new Date().toISOString()) : null
-    if (Object.keys(columns).length) must(await db.from('brands').update(columns as Update<'brands'>).eq('id', current.id))
+    const deal = flatDeal(current.deal)
+    const columns = brandColumns(input, { ...deal, pay_types: deal.income })
+    if (input.name?.trim()) columns.brand.name = input.name.trim()
+    if (input.archived !== undefined) columns.brand.archived_at = input.archived ? (current.archived_at ?? new Date().toISOString()) : null
+    if (Object.keys(columns.brand).length) must(await db.from('brands').update(columns.brand as Update<'brands'>).eq('id', current.id))
+    if (Object.keys(columns.deal).length) must(await db.from('brand_deals').upsert({ brand_id: current.id, ...columns.deal } as Insert<'brand_deals'>))
     const channels = input.channels ? await setBrandChannels(db, current.id, input.channels) : {}
     return text({
       updated: 'brand',
       organisation: org.name,
-      changed: [...Object.keys(columns), ...(input.channels ? ['channels'] : [])],
+      changed: [...Object.keys(columns.brand), ...Object.keys(columns.deal), ...(input.channels ? ['channels'] : [])],
       ...await brandSummary(db, current.id),
       ...channels
     })
@@ -697,8 +715,8 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
       const row = must(await db.from('formats').select('id, code, name, description').eq('id', id).maybeSingle())
       if (row) card = { id: row.id, title: `${row.code} · ${row.name}`, preview: row.description ?? undefined, path: paths.format(row.id) }
     } else if (type === 'brand') {
-      const row = must(await db.from('brands').select('id, name, notes').eq('id', id).maybeSingle())
-      if (row) card = { id: row.id, title: row.name, preview: row.notes ?? undefined, path: paths.brand(row.id) }
+      const row = must(await db.from('brands').select('id, name, about').eq('id', id).maybeSingle())
+      if (row) card = { id: row.id, title: row.name, preview: row.about ?? undefined, path: paths.brand(row.id) }
     } else if (type === 'product') {
       const row = must(await db.from('products').select('id, name, brand_id, notes, brand:brands(name)').eq('id', id).maybeSingle())
       if (row) card = { id: row.id, title: `${(row.brand as { name: string } | null)?.name ?? ''} · ${row.name}`, preview: row.notes ?? undefined, path: paths.product(row.brand_id, row.id) }

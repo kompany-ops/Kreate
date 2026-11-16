@@ -30,7 +30,8 @@ begin
   perform set_config('request.jwt.claims', be_agency, true);
   agency_org := public.create_org('Paw Agency', 'paw-agency', '{}', 'agency');
   if (select kind from public.my_orgs() where id = agency_org) <> 'agency' then raise exception 'FAILED: not an agency account'; end if;
-  insert into public.brands (name, slug, pay_types, flat_fee) values ('Brand A', 'brand-a', array['flat'], 120) returning id into brand_a;
+  insert into public.brands (name, slug) values ('Brand A', 'brand-a') returning id into brand_a;
+  insert into public.brand_deals (brand_id, pay_types, flat_fee) values (brand_a, array['flat'], 120);
   insert into public.brands (name, slug) values ('Brand B', 'brand-b') returning id into brand_b;
   insert into public.products (brand_id, name, slug) values (brand_a, 'A Thing', 'a-thing');
   insert into public.hook_templates (script) values ('The agency''s own hook') returning id into agency_hook;
@@ -54,7 +55,7 @@ begin
   creator_org := public.create_org('Agency Creator', 'agency-creator');
   linked := public.accept_partnership(invite, creator_org, '{}');
   if (select partner_org_id from public.brands where id = linked) <> agency_org then raise exception 'FAILED: the linked brand doesn''t say it''s from the agency'; end if;
-  if (select flat_fee from public.brands where id = linked) is not null or (select pay_types from public.brands where id = linked) <> '{}' then raise exception 'FAILED: the agency''s deal terms reached the creator'; end if;
+  if exists (select 1 from public.brand_deals where brand_id = linked) or exists (select 1 from public.brand_deals where flat_fee = 120) then raise exception 'FAILED: the agency''s deal terms reached the creator'; end if;
   select id into copy from public.hook_templates where source_id = agency_hook;
   if copy is null then raise exception 'FAILED: the agency''s own hook didn''t come along'; end if;
   if (select partner_org_id from public.hook_templates where id = copy) <> agency_org or (select brand_id from public.hook_templates where id = copy) is not null then

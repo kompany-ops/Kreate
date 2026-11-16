@@ -16,13 +16,17 @@ const assigned = ref<string[]>([])
 const products = shallowRef<Row<'products'>[]>([])
 const shoots = ref<Pick<Row<'shoots'>, 'id' | 'code' | 'product_id' | 'shoot_date' | 'status'>[]>([])
 
+// the deal (how the brand pays, and the team's notes) is its own table: the team's only
+const dealRow = ref<Row<'brand_deals'> | null>(null)
 async function loadBrand() {
-  const [b, links, prods] = await Promise.all([
+  const [b, links, prods, d] = await Promise.all([
     db.from('brands').select('*').eq('id', brandId).maybeSingle(),
     db.from('brand_channels').select('channel_id').eq('brand_id', brandId),
-    db.from('products').select('*').eq('brand_id', brandId).order('name')
+    db.from('products').select('*').eq('brand_id', brandId).order('name'),
+    db.from('brand_deals').select('*').eq('brand_id', brandId).maybeSingle()
   ])
   brand.value = must(b)
+  dealRow.value = d.data
   assigned.value = must(links).map(link => link.channel_id)
   products.value = must(prods)
   const ids = products.value.map(product => product.id)
@@ -44,9 +48,9 @@ const linked = computed(() => !!brand.value?.source_brand_id)
 const form = reactive({
   name: brand.value.name,
   status: brand.value.status,
-  notes: brand.value.notes ?? ''
+  notes: dealRow.value?.notes ?? ''
 })
-const deal = ref(toBrandDeal(brand.value))
+const deal = ref(toBrandDeal(dealRow.value, brand.value))
 const saving = ref(false)
 
 // --- the brand's public profile: what partner creators see -----------------------------------
@@ -81,13 +85,14 @@ async function saveProfile() {
 async function saveBrand() {
   saving.value = true
   await run(async () => {
+    const fields = fromBrandDeal(deal.value)
     must(await db.from('brands').update({
       // a partner's brand keeps the partner's name
       ...(linked.value ? {} : { name: form.name.trim() }),
       status: form.status,
-      notes: form.notes.trim() || null,
-      ...fromBrandDeal(deal.value)
+      ...fields.brand
     }).eq('id', brandId))
+    must(await db.from('brand_deals').upsert({ brand_id: brandId, ...fields.deal, notes: form.notes.trim() || null }))
     await loadBrand()
   }, 'Deal saved')
   saving.value = false
@@ -260,7 +265,7 @@ async function saveProduct() {
             @click="setArchived(true)"
           />
           </template>
-          <ShareToChat :share="{ type: 'brand', id: brand.id, title: brand.name, preview: brand.notes || undefined, path: `/brands/${brand.id}` }" />
+          <ShareToChat :share="{ type: 'brand', id: brand.id, title: brand.name, preview: brand.about || undefined, path: `/brands/${brand.id}` }" />
         </template>
       </UDashboardNavbar>
     </template>
