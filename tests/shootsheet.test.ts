@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ShootBundle } from '../shared/utils/shootsheet'
 import {
   brollChannelIds,
+  clipSpotInfo,
   brollFolder,
   buildCsv,
   buildShootsheet,
@@ -382,5 +383,22 @@ describe('usedByRecipes', () => {
 
   it('always keeps VOs', () => {
     expect(usedByRecipes(standalone, [])).toBe(true)
+  })
+})
+
+describe('clipSpotInfo', () => {
+  it('names a take and a b-roll clip, and keeps one person’s line one shot across channels', () => {
+    const b = bundle()
+    const vo = b.items.find(item => item.code === 'V01')!
+    b.items.push({ ...vo, id: 'i9', channel_id: 'c2' })
+    const nix = clipSpotInfo(b, 'item:i3:problem')!
+    expect(nix.label).toBe('V01 problem · Joe · topdognix')
+    // the same line on Joe's other channel is the same shot; another beat isn't
+    expect(clipSpotInfo(b, 'item:i9:problem')!.shot).toBe(nix.shot)
+    expect(clipSpotInfo(b, 'item:i3:product')!.shot).not.toBe(nix.shot)
+    expect(clipSpotInfo(b, 'item:i1')!.label).toBe('H01 · Joe · topdognix')
+    b.broll[0] = { ...b.broll[0]!, id: 's1' }
+    expect(clipSpotInfo(b, 'broll:s1:c2:0')).toEqual({ shot: 'broll:s1', label: 'b-roll "anxious pacing" · topdogwhiskey' })
+    expect(clipSpotInfo(b, 'item:nope')).toBeNull()
   })
 })

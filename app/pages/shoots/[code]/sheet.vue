@@ -2,7 +2,7 @@
 import type { BrollShot } from '#shared/utils/loadShoot'
 import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { BundleItem, ShotGroup } from '#shared/utils/shootsheet'
-import { brollChannelIds } from '#shared/utils/shootsheet'
+import { brollChannelIds, clipSpotInfo } from '#shared/utils/shootsheet'
 import type { Row } from '#shared/types/models'
 
 // On-set shot sheet (spec §10a): phone-first, big tap targets, saves on every tap.
@@ -701,6 +701,7 @@ function skipBroll(shot: Row<'broll_shots'>) {
                   :path="brollClipFolder(shot, channel.id)"
                   :rules="clipRules"
                   :label="brollClipLabel(shot, channel.name, nextBrollSlot(shot, channel.id)!)"
+                  :spot-info="(target: string) => clipSpotInfo(bundle, target)"
                   @saved="brollClipChanged(shot)"
                   @removed="brollClipChanged(shot)"
                 />

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { BundleItem, Recording } from '#shared/utils/shootsheet'
 import type { LoadedShoot } from '#shared/utils/loadShoot'
+import { clipSpotInfo } from '#shared/utils/shootsheet'
 
 // One take on the checklist (a hook, a CTA or one VO beat, by one person): the add-clip
 // button and its clip. A line that uses no channel slot is one take for all of the person's
@@ -46,6 +47,7 @@ const label = computed(() => {
     :also="props.recording.items.slice(1).map(spot)"
     :script="script"
     :label="label"
+    :spot-info="(target: string) => clipSpotInfo(props.bundle, target)"
     :expected-seconds="expectedSeconds"
     :rules="props.rules"
     :button-label="props.buttonLabel"

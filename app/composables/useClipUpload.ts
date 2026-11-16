@@ -163,6 +163,16 @@ export interface SharedClip {
   /** who added it, i.e. whose phone it's on */
   byId: string | null
   by: string | null
+  /** bytes, to spot the same file used twice */
+  size: number | null
+  /** its full Dropbox path once uploaded */
+  path: string | null
+}
+
+/** Where a spot on the checklist sits: the shot it's for (a line by one person, or a b-roll shot) and how to name it. */
+export interface ClipSpotInfo {
+  shot: string
+  label: string
 }
 
 const shared = shallowReactive(new Map<string, SharedClip>())
@@ -183,20 +193,22 @@ export const useClipUpload = () => {
   /** Dropbox is connected: uploads only run when it is */
   const connected = computed(() => !!dropbox.status.value?.connected)
 
-  type SharedRow = { target: string, shoot_id: string, file_name: string, state: string, created_by: string | null }
+  type SharedRow = { target: string, shoot_id: string, file_name: string, state: string, created_by: string | null, size?: number | null, path?: string | null }
   const setShared = (row: SharedRow) => shared.set(row.target, {
     shootId: row.shoot_id,
     fileName: row.file_name,
     state: row.state,
     byId: row.created_by,
-    by: row.created_by ? names.get(row.created_by) ?? null : null
+    by: row.created_by ? names.get(row.created_by) ?? null : null,
+    size: row.size ?? null,
+    path: row.path ?? null
   })
 
   /** (Re)load which deliverables of a shoot have footage on any phone. */
   async function fetchShared(shoot: { code: string, id: string }) {
     const [profiles, rows] = await Promise.all([
       db.from('profiles').select('id, full_name, email'),
-      db.from('shoot_clips').select('target, shoot_id, file_name, state, created_by').eq('shoot_id', shoot.id)
+      db.from('shoot_clips').select('target, shoot_id, file_name, state, created_by, size, path').eq('shoot_id', shoot.id)
     ])
     for (const profile of profiles.data ?? []) names.set(profile.id, profile.full_name?.split(' ')[0] || profile.email || 'someone')
     if (rows.error) return
@@ -261,7 +273,7 @@ export const useClipUpload = () => {
     must(await db.from('shoot_clips').delete().eq('shoot_id', shootId).eq('target', target))
     const row = must(await db.from('shoot_clips')
       .insert({ shoot_id: shootId, target, file_name: clip.name, size: clip.size, state: clip.state === 'uploaded' ? 'uploaded' : 'saved', path: clip.path })
-      .select('target, shoot_id, file_name, state, created_by')
+      .select('target, shoot_id, file_name, state, created_by, size, path')
       .single())
     if (row) setShared(row)
   }
@@ -490,6 +502,33 @@ export const useClipUpload = () => {
     })
   }
 
+  /**
+   * The same file (name and size) already used for a different shot on this shoot, on any
+   * phone: usually a mix-up. `spots` are the ones this take is for (its copies on the person's
+   * other channels are the same take, not a duplicate); `spotInfo` places a target on the shoot.
+   */
+  function duplicateOf(
+    shoot: string,
+    file: { name: string, size: number },
+    spots: string[],
+    spotInfo: (target: string) => ClipSpotInfo | null
+  ): { label: string, by: string | null } | null {
+    const shootId = shootIds.get(shoot)
+    const mine = spotInfo(spots[0]!)?.shot
+    const candidates: { target: string, name: string, size: number | null, by: string | null }[] = [
+      ...[...clips.entries()].filter(([, clip]) => clip.shoot === shoot).map(([target, clip]) => ({ target, name: clip.name, size: clip.size, by: null })),
+      ...[...shared.entries()].filter(([target, clip]) => clip.shootId === shootId && !clips.has(target))
+        .map(([target, clip]) => ({ target, name: clip.fileName, size: clip.size, by: clip.by }))
+    ]
+    for (const other of candidates) {
+      if (spots.includes(other.target) || other.name !== file.name || (other.size !== null && other.size !== file.size)) continue
+      const info = spotInfo(other.target)
+      if (info && info.shot === mine) continue
+      return { label: info?.label ?? 'another shot', by: other.by }
+    }
+    return null
+  }
+
   /** Each phone's clips for a shoot (by whoever added them), for the upload progress. */
   function phones(shootId: string) {
     const byPhone = new Map<string, { name: string, total: number, uploaded: number }>()
@@ -516,6 +555,7 @@ export const useClipUpload = () => {
     elsewhere: (target: string) => clips.has(target) ? null : shared.get(target) ?? null,
     /** whether a target has footage on any phone (this one included) */
     taken: (target: string) => clips.has(target) || shared.has(target),
+    duplicateOf,
     load,
     discardBefore,
     resync: fetchShared,

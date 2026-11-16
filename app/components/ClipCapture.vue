@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { ClipSpotInfo } from '~/composables/useClipUpload'
+
 // Add a clip for one checklist target from the phone (Photos or Files) and save it on the
 // phone through useClipUpload, which sends it to Dropbox straight away (spec §12). Replace and Remove
 // take an uploaded clip out of Dropbox too.
@@ -34,13 +36,15 @@ const props = withDefaults(defineProps<{
   also?: { target: string, path: string }[]
   /** what's said in the clip, for its captions */
   script?: string | null
+  /** places any target on the shoot (its shot and name), to warn when one file is used for two shots */
+  spotInfo?: (target: string) => ClipSpotInfo | null
 }>(), { part: 'all', rules: () => DEFAULT_CLIP_RULES, expectedSeconds: 0, size: 'sm' })
 
 // A saved clip is what ticks a deliverable off: `saved` when this target gains one,
 // `removed` when it loses it.
 const emit = defineEmits<{ saved: [], removed: [] }>()
 
-const { clipFor, elsewhere, save, remove } = useClipUpload()
+const { clipFor, elsewhere, save, remove, duplicateOf } = useClipUpload()
 const { confirmDialog } = useConfirm()
 const toast = useToast()
 const clip = computed(() => clipFor(props.target))
@@ -74,6 +78,16 @@ async function send(file: File) {
     description: `Use this clip instead? The one on ${otherPhone.value} will no longer count.`,
     confirmLabel: 'Use this clip'
   }))) return
+  // the same file already used for another shot is usually a mix-up
+  if (props.spotInfo) {
+    const spots = [props.target, ...(props.also ?? []).map(spot => spot.target)]
+    const duplicate = duplicateOf(props.shoot, file, spots, props.spotInfo)
+    if (duplicate && !(await confirmDialog({
+      title: 'Already used for another shot',
+      description: `${file.name} is already the clip for ${duplicate.label}${duplicate.by ? ` (added on ${duplicate.by}'s phone)` : ''}. Use it here too, or cancel and pick another.`,
+      confirmLabel: 'Use it here too'
+    }))) return
+  }
   checking.value = true
   const checked = await check(file).finally(() => (checking.value = false))
   if (checked.issues.length && !(await confirmDialog({
@@ -122,6 +136,26 @@ async function removeClip() {
     return
   }
   emit('removed')
+}
+
+// --- view in Dropbox ------------------------------------------------------------
+
+const opening = ref(false)
+/** Open an uploaded clip in Dropbox (its shared link), in a new tab. */
+async function viewInDropbox(path: string) {
+  // open the tab straight from the tap (iOS blocks one opened later), then send it to the link
+  const tab = window.open('', '_blank')
+  opening.value = true
+  try {
+    const url = await dropboxViewLink(path)
+    if (tab) tab.location.href = url
+    else window.location.href = url
+  } catch {
+    tab?.close()
+    toast.add({ title: 'Couldn\'t open it in Dropbox', description: 'Check your connection and try again.', color: 'error', icon: 'i-lucide-cloud-alert' })
+  } finally {
+    opening.value = false
+  }
 }
 
 const badge = computed(() => {
@@ -174,9 +208,20 @@ const badge = computed(() => {
     <!-- added on another phone: just who has it -->
     <p v-if="showClip && !clip && other" class="flex items-center gap-1.5 rounded-md border border-default px-2 py-1.5 text-sm text-muted">
       <UIcon name="i-lucide-smartphone" class="size-4 shrink-0" />
-      <span class="min-w-0 truncate">
+      <span class="min-w-0 flex-1 truncate">
         {{ other.fileName }} · on {{ otherPhone }}{{ other.state === 'uploaded' ? ' · uploaded' : '' }}
       </span>
+      <UButton
+        v-if="other.state === 'uploaded' && other.path"
+        icon="i-lucide-external-link"
+        size="xs"
+        color="neutral"
+        variant="ghost"
+        :loading="opening"
+        :aria-label="`View the clip for ${props.label} in Dropbox`"
+        title="View in Dropbox"
+        @click="viewInDropbox(other.path)"
+      />
     </p>
 
     <div v-if="showClip && clip" class="space-y-2 rounded-md border border-default p-2">
@@ -192,6 +237,17 @@ const badge = computed(() => {
             </template>
           </p>
         </div>
+        <UButton
+          v-if="clip.state === 'uploaded' && clip.path?.startsWith('/')"
+          icon="i-lucide-external-link"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          :loading="opening"
+          :aria-label="`View the clip for ${props.label} in Dropbox`"
+          title="View in Dropbox"
+          @click="viewInDropbox(clip.path!)"
+        />
         <UButton
           icon="i-lucide-trash-2"
           color="error"

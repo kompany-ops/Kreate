@@ -559,6 +559,39 @@ export function brollChannelIds(
     && (channelId === null || item.channel_id === channelId)))
 }
 
+/**
+ * Where a checklist clip target (`item:<id>[:<beat>]`, `broll:<shot>:<channel>:<n>`) sits on the
+ * shoot: the shot it's for and a name for it. One person's line is one shot across their channels
+ * (the same take fills each), and a b-roll shot is one shot across channels and clips; anything
+ * else with the same file is a different shot. Null when the target isn't on the shoot.
+ */
+export function clipSpotInfo(
+  bundle: Pick<ShootBundle, 'items' | 'broll' | 'people' | 'channels'>,
+  target: string
+): { shot: string, label: string } | null {
+  const [kind, id, part] = target.split(':')
+  const channelName = (channelId: string | null | undefined) => bundle.channels.find(channel => channel.id === channelId)?.name
+  if (kind === 'item') {
+    const item = bundle.items.find(entry => entry.id === id)
+    if (!item) return null
+    const beat = part ? (itemBeats(item).find(name => !!name && slugify(name) === part) ?? part.replace(/-/g, ' ')) : null
+    const person = bundle.people.find(entry => entry.id === item.person_id)?.name
+    return {
+      shot: `item:${item.template_id}|${part ?? ''}|${item.person_id ?? ''}`,
+      label: [`${item.code}${beat ? ` ${beat}` : ''}`, person, channelName(item.channel_id)].filter(Boolean).join(' · ')
+    }
+  }
+  if (kind === 'broll') {
+    const shot = bundle.broll.find(entry => entry.id === id)
+    if (!shot) return null
+    return {
+      shot: `broll:${shot.id}`,
+      label: [`b-roll "${shot.description}"`, channelName(part === 'shared' ? null : part)].filter(Boolean).join(' · ')
+    }
+  }
+  return null
+}
+
 function channelSlug(bundle: ShootBundle, channelId: string | null): string | null {
   return bundle.channels.find(channel => channel.id === channelId)?.slug ?? null
 }

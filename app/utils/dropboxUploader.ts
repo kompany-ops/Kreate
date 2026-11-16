@@ -187,6 +187,30 @@ export async function dropboxReadText(path: string): Promise<string | null> {
   })
 }
 
+/**
+ * A link to view an uploaded file (its full Dropbox path) in Dropbox: its existing shared link,
+ * or a new one. Works for anyone on the team, whichever Dropbox the shoot is in.
+ */
+export async function dropboxViewLink(path: string): Promise<string> {
+  type Links = { links: { url: string }[] }
+  const call = <T>(route: string, body: object) => withRetries(token => $fetch<T>(`https://api.dropboxapi.com/2/sharing/${route}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body
+  }))
+  const existing = await call<Links>('list_shared_links', { path, direct_only: true })
+  if (existing.links[0]) return existing.links[0].url
+  try {
+    return (await call<{ url: string }>('create_shared_link_with_settings', { path })).url
+  } catch (error) {
+    // made in the meantime: Dropbox hands it back with the error
+    const url = (error as { data?: { error?: { shared_link_already_exists?: { metadata?: { url?: string } } } } })
+      .data?.error?.shared_link_already_exists?.metadata?.url
+    if (url) return url
+    throw error
+  }
+}
+
 /** Create a folder (relative to the root); fine if it's already there. */
 export async function dropboxEnsureFolder(folder: string) {
   const { root } = await getAccess()
