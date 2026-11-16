@@ -50,7 +50,9 @@ export function useLibrary<T extends LibraryTable>(table: T, options: {
   function visible(filter: (row: Row<T>) => boolean = () => true): Row<T>[] {
     const term = search.value.trim().toLowerCase()
     const list = rows.value.filter(row =>
-      row.archived === showArchived.value
+      // linked in from a partner brand: theirs, offered only on their shoots
+      !(row as { source_id?: string | null }).source_id
+      && row.archived === showArchived.value
       && (!term || options.text(row).toLowerCase().includes(term))
       && filter(row)
     )

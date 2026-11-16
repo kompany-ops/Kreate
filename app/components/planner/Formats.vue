@@ -5,6 +5,8 @@ import type { BrollFormat } from './Broll.vue'
 // Removing a format takes its VOs off the structure (for everyone) and its b-roll shots with it.
 const props = defineProps<{
   shootId: string
+  /** the shoot's product: its brand decides which formats it can use */
+  productId: string
   formats: BrollFormat[]
   /** b-roll shots per format id, for the remove confirmation */
   brollCounts: Record<string, number>
@@ -16,10 +18,10 @@ const emit = defineEmits<{ changed: [] }>()
 
 const db = useDb()
 const run = useAction()
-const { formats: allFormats } = useRefData()
+const { formatsFor } = useRefData()
 
-const addable = computed(() => allFormats.value
-  .filter(format => !format.archived && !props.formats.some(on => on.id === format.id))
+const addable = computed(() => formatsFor(props.productId)
+  .filter(format => !props.formats.some(on => on.id === format.id))
   .map(format => ({ label: `${format.code} · ${format.name}`, value: format.id })))
 const toAdd = ref<string | undefined>()
 

@@ -22,7 +22,7 @@ const emit = defineEmits<{ saved: [vo: Row<'body_templates'>, isNew: boolean] }>
 const db = useDb()
 const run = useAction()
 const { confirmDialog } = useConfirm()
-const { formats, hookTypes, people: allPeople, featureOptions, featureOf, productOf, settings } = useRefData()
+const { formats, hookTypes, people: allPeople, featureOptions, featureOf, productOf, settings, formatsFor } = useRefData()
 const { me, isAdmin, canEditVo } = useMe()
 /** admins can write a VO for anyone on the shoot; everyone else writes their own */
 const writerOptions = computed(() => props.people.map(person => ({ label: person.name, value: person.id })))
@@ -30,7 +30,7 @@ const choosesWriter = computed(() => isAdmin.value && !form.id)
 const { context } = usePreviewContext()
 
 const formatOptions = computed(() =>
-  formats.value.filter(f => !f.archived).map(f => ({ label: `${f.code} — ${f.name}`, value: f.id }))
+  formatsFor(props.productId).map(f => ({ label: `${f.code} — ${f.name}`, value: f.id }))
 )
 const formatOf = (id: string | undefined) => formats.value.find(f => f.id === id)
 

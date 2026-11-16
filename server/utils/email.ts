@@ -123,3 +123,27 @@ export function inviteEmail(options: { orgName: string, inviterName: string, ema
   ].join('\n')
   return { subject: `${inviterName} invited you to ${orgName} on Kreate`, html, text }
 }
+
+/** A brand's invitation to partner with a creator account, from the person who sent it. */
+export function partnerInviteEmail(options: { brandName: string, inviterName: string, email: string, link: string }) {
+  const { brandName, inviterName, email, link } = options
+  const html = emailLayout({
+    preheader: `${brandName} wants to partner with you on Kreate.`,
+    heading: `Partner with ${brandName}`,
+    body: emailParagraph(`${emailStrong(inviterName)} invited you to partner with ${emailStrong(brandName)} on Kreate.`)
+      + emailParagraph(`Accept, and ${escapeHtml(brandName)} joins your brands: its products and its best hooks, CTAs and formats, ready to plan shoots with. Your deal and your channels stay yours.`)
+      + emailButton('See the invitation', link)
+      + emailParagraph(`Sign in with ${emailStrong(email)} (or create a free creator account with it), and you'll find the invitation on your Brands page.`, 14, MUTED, '24px 0 0'),
+    note: `${escapeHtml(inviterName)} sent this to ${escapeHtml(email)}. Not expecting it? You can ignore it: nothing happens unless you accept. Replying reaches ${escapeHtml(inviterName)}.`
+  })
+  const text = [
+    `${inviterName} invited you to partner with ${brandName} on Kreate.`,
+    '',
+    `See the invitation: ${link}`,
+    '',
+    `Sign in with ${email} (or create a free creator account with it), and you'll find it on your Brands page. Your deal and your channels stay yours.`,
+    '',
+    'Not expecting this? Ignore it: nothing happens unless you accept. Questions? hello@ugckompany.com'
+  ].join('\n')
+  return { subject: `${brandName} wants to partner with you on Kreate`, html, text }
+}

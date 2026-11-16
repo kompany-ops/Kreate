@@ -63,9 +63,22 @@ export const useRefData = () => {
   ])
   const brandOf = (id: string | null | undefined) => brands.value.find(brand => brand.id === id) ?? null
 
+  /**
+   * The formats a product's shoots can use: general ones and its brand's. A partner brand that keeps
+   * its shoots to its own Library (library_rule brand_only) gets only its own.
+   */
+  const formatsFor = (productId: string | null | undefined) => {
+    const brand = productOf(productId)?.brand
+    return formats.value.filter(format => !format.archived && (
+      brand?.source_brand_id && brand.library_rule === 'brand_only'
+        ? format.brand_id === brand.id && !!format.source_id
+        : !format.brand_id || format.brand_id === brand?.id
+    ))
+  }
+
   const channelOptions = computed(() =>
     channels.value.filter(channel => channel.active).map(channel => ({ label: channel.name, value: channel.id }))
   )
 
-  return { people, channels, hookTypes, formats, products, brands, features, settings, load, hookTypeName, hookTypeOptions, productOptions, scopeOptions, featureOptions, featureOf, productOf, brandOf, channelOptions }
+  return { people, channels, hookTypes, formats, products, brands, features, settings, load, hookTypeName, hookTypeOptions, productOptions, scopeOptions, featureOptions, featureOf, productOf, brandOf, formatsFor, channelOptions }
 }

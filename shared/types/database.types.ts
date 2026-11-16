@@ -332,6 +332,7 @@ export type Database = {
           pay_types: string[]
           retainer_fee: number | null
           slug: string
+          source_brand_id: string | null
           starred: boolean
           status: string
           trybe_brand_id: string | null
@@ -361,6 +362,7 @@ export type Database = {
           pay_types?: string[]
           retainer_fee?: number | null
           slug: string
+          source_brand_id?: string | null
           starred?: boolean
           status?: string
           trybe_brand_id?: string | null
@@ -390,6 +392,7 @@ export type Database = {
           pay_types?: string[]
           retainer_fee?: number | null
           slug?: string
+          source_brand_id?: string | null
           starred?: boolean
           status?: string
           trybe_brand_id?: string | null
@@ -600,6 +603,7 @@ export type Database = {
           product_id: string | null
           script: string
           shoot_id: string | null
+          source_id: string | null
           source_url: string | null
           tags: string[]
           updated_at: string
@@ -617,6 +621,7 @@ export type Database = {
           product_id?: string | null
           script: string
           shoot_id?: string | null
+          source_id?: string | null
           source_url?: string | null
           tags?: string[]
           updated_at?: string
@@ -634,6 +639,7 @@ export type Database = {
           product_id?: string | null
           script?: string
           shoot_id?: string | null
+          source_id?: string | null
           source_url?: string | null
           tags?: string[]
           updated_at?: string
@@ -741,6 +747,7 @@ export type Database = {
           kind: string
           name: string
           org_id: string
+          source_id: string | null
           source_url: string | null
           target_seconds: number | null
           updated_at: string
@@ -762,6 +769,7 @@ export type Database = {
           kind?: string
           name: string
           org_id?: string
+          source_id?: string | null
           source_url?: string | null
           target_seconds?: number | null
           updated_at?: string
@@ -783,6 +791,7 @@ export type Database = {
           kind?: string
           name?: string
           org_id?: string
+          source_id?: string | null
           source_url?: string | null
           target_seconds?: number | null
           updated_at?: string
@@ -820,6 +829,7 @@ export type Database = {
           product_id: string | null
           script: string
           shoot_id: string | null
+          source_id: string | null
           source_url: string | null
           tags: string[]
           updated_at: string
@@ -839,6 +849,7 @@ export type Database = {
           product_id?: string | null
           script: string
           shoot_id?: string | null
+          source_id?: string | null
           source_url?: string | null
           tags?: string[]
           updated_at?: string
@@ -858,6 +869,7 @@ export type Database = {
           product_id?: string | null
           script?: string
           shoot_id?: string | null
+          source_id?: string | null
           source_url?: string | null
           tags?: string[]
           updated_at?: string
@@ -1252,6 +1264,99 @@ export type Database = {
           },
         ]
       }
+      partnerships: {
+        Row: {
+          accepted_at: string | null
+          brand_id: string
+          brand_name: string
+          created_at: string
+          creator_name: string | null
+          creator_org_id: string | null
+          emailed_at: string | null
+          ended_at: string | null
+          id: string
+          invited_by: string | null
+          invited_email: string
+          linked_brand_id: string | null
+          publisher_name: string
+          publisher_org_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          brand_id: string
+          brand_name: string
+          created_at?: string
+          creator_name?: string | null
+          creator_org_id?: string | null
+          emailed_at?: string | null
+          ended_at?: string | null
+          id?: string
+          invited_by?: string | null
+          invited_email: string
+          linked_brand_id?: string | null
+          publisher_name: string
+          publisher_org_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          brand_id?: string
+          brand_name?: string
+          created_at?: string
+          creator_name?: string | null
+          creator_org_id?: string | null
+          emailed_at?: string | null
+          ended_at?: string | null
+          id?: string
+          invited_by?: string | null
+          invited_email?: string
+          linked_brand_id?: string | null
+          publisher_name?: string
+          publisher_org_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "partnerships_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "partnerships_creator_org_id_fkey"
+            columns: ["creator_org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "partnerships_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "partnerships_linked_brand_id_fkey"
+            columns: ["linked_brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "partnerships_publisher_org_id_fkey"
+            columns: ["publisher_org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       people: {
         Row: {
           active: boolean
@@ -1354,6 +1459,7 @@ export type Database = {
           product_id: string
           slug: string
           sort_order: number
+          source_feature_id: string | null
           updated_at: string
         }
         Insert: {
@@ -1366,6 +1472,7 @@ export type Database = {
           product_id: string
           slug?: string
           sort_order?: number
+          source_feature_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -1378,6 +1485,7 @@ export type Database = {
           product_id?: string
           slug?: string
           sort_order?: number
+          source_feature_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1416,6 +1524,7 @@ export type Database = {
           notes: string | null
           org_id: string
           slug: string
+          source_product_id: string | null
           updated_at: string
         }
         Insert: {
@@ -1429,6 +1538,7 @@ export type Database = {
           notes?: string | null
           org_id?: string
           slug: string
+          source_product_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -1442,6 +1552,7 @@ export type Database = {
           notes?: string | null
           org_id?: string
           slug?: string
+          source_product_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -2416,6 +2527,10 @@ export type Database = {
       }
     }
     Functions: {
+      accept_partnership: {
+        Args: { p_channel_ids?: string[]; p_id: string; p_org_id: string }
+        Returns: string
+      }
       chat_unread_count: { Args: never; Returns: number }
       create_org: {
         Args: {
@@ -2427,6 +2542,12 @@ export type Database = {
         Returns: string
       }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      decline_partnership: { Args: { p_id: string }; Returns: undefined }
+      end_partnership: { Args: { p_id: string }; Returns: undefined }
+      invite_partner: {
+        Args: { p_brand_id: string; p_email: string }
+        Returns: string
+      }
       mark_chat_read: { Args: never; Returns: undefined }
       my_org_summaries: {
         Args: never
@@ -2468,6 +2589,17 @@ export type Database = {
           name: string
           role: string
           slug: string
+        }[]
+      }
+      my_partner_invites: {
+        Args: never
+        Returns: {
+          about: string
+          brand_name: string
+          created_at: string
+          id: string
+          logo_url: string
+          publisher_name: string
         }[]
       }
       my_plan: {

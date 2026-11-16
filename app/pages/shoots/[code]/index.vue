@@ -968,6 +968,7 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
           </template>
           <PlannerFormats
             :shoot-id="shoot.id"
+            :product-id="shoot.product_id"
             :formats="shootFormats"
             :broll-counts="brollCounts"
             :vo-item-ids="voItemIds"

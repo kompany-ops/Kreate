@@ -26,6 +26,7 @@ const items = computed<NavigationMenuItem[]>(() => isPublisher.value ? [
   // a brand account: its brand (profile and products), its Library, chat and settings
   { label: 'Brand', icon: 'i-lucide-store', to: '/brand', active: route.path === '/brand' || route.path.startsWith('/brands/') },
   { label: 'Library', icon: 'i-lucide-library', to: '/library' },
+  { label: 'Creators', icon: 'i-lucide-users', to: '/creators' },
   { label: 'Chat', icon: 'i-lucide-messages-square', to: '/chat', ...(chat.unread.value ? { badge: { label: chat.unread.value > 99 ? '99+' : String(chat.unread.value), color: 'primary' as const, variant: 'solid' as const } } : {}) },
   ...(isAdmin.value ? [{ label: 'Settings', icon: 'i-lucide-settings', to: '/settings' }] : [])
 ] : [

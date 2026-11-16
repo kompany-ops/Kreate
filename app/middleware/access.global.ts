@@ -24,6 +24,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (needsPicker.value) return navigateTo('/account')
   // a brand account never shoots, and has one brand: its Brand page
   if (isPublisher.value && (to.path === '/' || to.path.startsWith('/shoots') || to.path === '/brands')) return navigateTo('/brand')
+  // Creators is a brand account's (the creators it partners with)
+  if (!isPublisher.value && to.path === '/creators') return navigateTo('/brands')
   // the Library and Brands are the team's: cast land on their shoots
   if (isCast.value && (to.path === '/' || to.path.startsWith('/library') || to.path.startsWith('/brands'))) return navigateTo('/shoots')
   // Settings is the organisation's, for the team; everyone's own things are in Your account

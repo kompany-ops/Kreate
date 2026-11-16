@@ -12,6 +12,9 @@ const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const { channels, load } = useRefData()
+const { access, isAdmin } = useAccess()
+const { currentOrg } = useOrg()
+const { confirmDialog } = useConfirm()
 
 // Grid (cards), list (a table) or board (a column per status, to move brands along). The view
 // lives in the URL so it survives reloads and can be linked.
@@ -46,7 +49,56 @@ async function loadBrands() {
   }
   brands.value = all
 }
-await Promise.all([load(), loadBrands()])
+// partner brands: who each one is from (restructure Phase 3)
+const partnerOf = ref(new Map<string, string>())
+async function loadPartners() {
+  const rows = must(await db.from('partnerships').select('linked_brand_id, publisher_name').not('linked_brand_id', 'is', null))
+  partnerOf.value = new Map(rows.map(row => [row.linked_brand_id!, row.publisher_name]))
+}
+const fromPartner = (brand: BrandRow) => brand.source_brand_id ? partnerOf.value.get(brand.id) ?? 'a partner' : null
+
+// invitations waiting for your email: accept one into this account, on the channels you choose
+type Invite = { id: string, publisher_name: string, brand_name: string, about: string | null, logo_url: string | null }
+const invites = ref<Invite[]>([])
+async function loadInvites() {
+  const { data } = await db.rpc('my_partner_invites')
+  invites.value = (data ?? []) as Invite[]
+}
+await Promise.all([load(), loadBrands(), loadPartners(), loadInvites()])
+
+const accepting = ref<Invite | null>(null)
+const acceptChannels = ref<string[]>([])
+const activeChannels = computed(() => channels.value.filter(channel => channel.active))
+function startAccept(invite: Invite) {
+  accepting.value = invite
+  acceptChannels.value = activeChannels.value.map(channel => channel.id)
+}
+const savingInvite = ref(false)
+async function accept() {
+  const invite = accepting.value
+  if (!invite || !currentOrg.value) return
+  savingInvite.value = true
+  const ok = await run(async () => {
+    const { error } = await db.rpc('accept_partnership', { p_id: invite.id, p_org_id: currentOrg.value!.id, p_channel_ids: acceptChannels.value })
+    if (error) throw error
+    await Promise.all([loadBrands(), loadPartners(), loadInvites(), load(true)])
+  }, `${invite.brand_name} is one of your brands`)
+  savingInvite.value = false
+  if (ok) accepting.value = null
+}
+async function decline(invite: Invite) {
+  if (!(await confirmDialog({
+    title: `Decline ${invite.brand_name}'s invitation?`,
+    description: 'They can invite you again later.',
+    confirmLabel: 'Decline',
+    danger: true
+  }))) return
+  await run(async () => {
+    const { error } = await db.rpc('decline_partnership', { p_id: invite.id })
+    if (error) throw error
+    await loadInvites()
+  }, 'Declined')
+}
 
 // --- filters ---------------------------------------------------------------
 // A brand with no value for a filtered field (e.g. no Trybe score yet) is left out by that filter.
@@ -58,6 +110,8 @@ const DEFAULT_FILTERS = {
   category: 'all',
   channel: 'all',
   matched: 'all',
+  /** all, mine (your own brands) or partners (partner brands) */
+  source: 'all',
   starred: false
 }
 const filters = reactive({ ...DEFAULT_FILTERS })
@@ -124,6 +178,7 @@ const filtered = computed(() => {
         ? !brand.brand_channels.length
         : brand.brand_channels.some(link => link.channel_id === filters.channel)))
       && (filters.matched === 'all' || data.matched === filters.matched)
+      && (filters.source === 'all' || (filters.source === 'mine' ? !brand.source_brand_id : !!brand.source_brand_id))
   })
   // brands without the sorted value go last
   const desc = (pick: (brand: BrandRow) => number | null) => (a: BrandRow, b: BrandRow) =>
@@ -294,6 +349,9 @@ async function save() {
                 <UFormField label="Channel">
                   <USelect v-model="filters.channel" :items="channelFilterOptions" class="w-full" />
                 </UFormField>
+                <UFormField label="Whose">
+                  <USelect v-model="filters.source" :items="[{ label: 'All brands', value: 'all' }, { label: 'Your own', value: 'mine' }, { label: 'Partnerships', value: 'partners' }]" class="w-full" />
+                </UFormField>
                 <UFormField label="Scrybe match">
                   <USelect v-model="filters.matched" :items="matchedOptions" class="w-full" />
                 </UFormField>
@@ -333,6 +391,45 @@ async function save() {
     </template>
 
     <template #body>
+      <div v-if="invites.length" class="mb-4 space-y-2">
+        <div v-for="invite in invites" :key="invite.id" class="flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-4 py-3">
+          <img v-if="invite.logo_url" :src="invite.logo_url" alt="" class="size-8 shrink-0 rounded object-cover" referrerpolicy="no-referrer">
+          <div class="min-w-0 flex-1">
+            <p class="font-medium text-highlighted">
+              {{ invite.publisher_name }} wants to partner with you on {{ invite.brand_name }}
+            </p>
+            <p class="text-sm text-muted">
+              {{ invite.about || 'Its products and Library join your brands, kept up to date. Your deal and channels stay yours.' }}
+            </p>
+          </div>
+          <template v-if="isAdmin && access?.kind === 'creator'">
+            <UButton label="Decline" color="neutral" variant="ghost" size="sm" @click="decline(invite)" />
+            <UButton label="Accept" icon="i-lucide-handshake" size="sm" @click="startAccept(invite)" />
+          </template>
+          <span v-else class="text-xs text-muted">Switch to a creator account you're on the team of to accept it.</span>
+        </div>
+      </div>
+
+      <UModal :open="!!accepting" :title="accepting ? `Partner with ${accepting.brand_name}` : ''" @update:open="open => { if (!open) accepting = null }">
+        <template #body>
+          <div class="space-y-4">
+            <p class="text-sm text-muted">
+              {{ accepting?.brand_name }} joins {{ currentOrg?.name }}'s brands, with its products and Library. Which channels is it for?
+            </p>
+            <UCheckboxGroup
+              v-model="acceptChannels"
+              :items="activeChannels.map(channel => ({ label: channel.name, value: channel.id }))"
+            />
+            <p v-if="!activeChannels.length" class="text-sm text-muted">
+              No channels yet: you can choose them on the brand's page later.
+            </p>
+          </div>
+        </template>
+        <template #footer>
+          <UButton label="Accept" icon="i-lucide-handshake" :loading="savingInvite" @click="accept" />
+        </template>
+      </UModal>
+
       <div v-if="view === 'grid'" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <NuxtLink
           v-for="brand in pageBrands"
@@ -354,6 +451,7 @@ async function save() {
             </h2>
             <div class="flex shrink-0 items-center gap-1">
               <BrandStar :starred="brand.starred" :name="brand.name" @toggle="toggleStar(brand)" />
+              <UBadge v-if="fromPartner(brand)" :label="`From ${fromPartner(brand)}`" icon="i-lucide-handshake" color="secondary" variant="subtle" />
               <UBadge v-if="brand.archived_at" label="Archived" color="neutral" variant="outline" />
               <UBadge v-else :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
             </div>

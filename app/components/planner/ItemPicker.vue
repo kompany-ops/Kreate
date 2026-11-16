@@ -57,19 +57,24 @@ watch(open, async (isOpen) => {
   loading.value = true
   await run(async () => {
     // general items, this brand's and this product's own; items written in other shoots stay with them
-    const brandId = productOf(props.productId)?.brand_id
+    const brand = productOf(props.productId)?.brand
+    const brandId = brand?.id
     const forThisShoot = libraryFilterFor(props.productId, brandId)
+    // a partner brand that keeps its shoots to its own Library: only what it shared
+    const brandOnly = !!brand?.source_brand_id && brand.library_rule === 'brand_only'
     if (props.kinds.includes('hook')) {
-      hooks.value = must(await db.from('hook_templates').select('*').eq('archived', false).is('shoot_id', null)
-        .or(forThisShoot).order('created_at', { ascending: false }))
+      let query = db.from('hook_templates').select('*').eq('archived', false).is('shoot_id', null).or(forThisShoot)
+      if (brandOnly) query = query.not('source_id', 'is', null)
+      hooks.value = must(await query.order('created_at', { ascending: false }))
     }
     if (props.kinds.includes('body')) {
       allBodies.value = must(await db.from('body_templates').select('*, feature:product_features(name)')
         .eq('archived', false).eq('product_id', props.productId).order('created_at'))
     }
     if (props.kinds.includes('cta')) {
-      ctas.value = must(await db.from('cta_templates').select('*').eq('archived', false).is('shoot_id', null)
-        .or(forThisShoot).order('created_at', { ascending: false }))
+      let query = db.from('cta_templates').select('*').eq('archived', false).is('shoot_id', null).or(forThisShoot)
+      if (brandOnly) query = query.not('source_id', 'is', null)
+      ctas.value = must(await query.order('created_at', { ascending: false }))
     }
   })
   loading.value = false

@@ -28,8 +28,15 @@ async function loadBrand() {
     ? must(await db.from('shoots').select('id, code, product_id, shoot_date, status').in('product_id', ids).is('stale_at', null).order('code', { ascending: false }))
     : []
 }
-await Promise.all([load(), loadBrand()])
+// a partner's brand, linked in: its profile and products are the partner's (read-only), the deal is yours
+const partner = ref<string | null>(null)
+async function loadPartner() {
+  const { data } = await db.from('partnerships').select('publisher_name').eq('linked_brand_id', brandId).maybeSingle()
+  partner.value = data?.publisher_name ?? null
+}
+await Promise.all([load(), loadBrand(), loadPartner()])
 if (!brand.value) throw createError({ statusCode: 404, statusMessage: 'Brand not found', fatal: true })
+const linked = computed(() => !!brand.value?.source_brand_id)
 
 // --- brand fields ----------------------------------------------------------
 const form = reactive({
@@ -73,7 +80,8 @@ async function saveBrand() {
   saving.value = true
   await run(async () => {
     must(await db.from('brands').update({
-      name: form.name.trim(),
+      // a partner's brand keeps the partner's name
+      ...(linked.value ? {} : { name: form.name.trim() }),
       status: form.status,
       notes: form.notes.trim() || null,
       ...fromBrandDeal(deal.value)
@@ -273,10 +281,18 @@ async function saveProduct() {
               Profile
             </h2>
             <p class="text-sm text-muted">
-              {{ isPublisher ? 'What creators you partner with see about you.' : 'What the brand is about, and how its shoots use the Library.' }}
+              <template v-if="isPublisher">
+                What creators you partner with see about you.
+              </template>
+              <template v-else-if="linked">
+                From {{ partner ?? 'your partner' }}: they keep it up to date.
+              </template>
+              <template v-else>
+                What the brand is about, and how its shoots use the Library.
+              </template>
             </p>
           </template>
-          <div class="space-y-4">
+          <fieldset :disabled="linked" class="space-y-4">
             <UFormField v-if="isPublisher" label="Name">
               <UInput v-model="form.name" class="w-full" />
             </UFormField>
@@ -293,10 +309,10 @@ async function saveProduct() {
               <UTextarea v-model="profileForm.guidelines" autoresize class="w-full" />
             </UFormField>
             <UFormField label="Library" help="Which hooks, CTAs and formats its shoots can use">
-              <USelect v-model="profileForm.library_rule" :items="LIBRARY_RULES" class="w-full" />
+              <USelect v-model="profileForm.library_rule" :items="LIBRARY_RULES" class="w-full" :disabled="linked" />
             </UFormField>
-          </div>
-          <template #footer>
+          </fieldset>
+          <template v-if="!linked" #footer>
             <UButton
               label="Save profile"
               :loading="savingProfile"
@@ -314,7 +330,7 @@ async function saveProduct() {
           </template>
           <div class="space-y-4">
             <UFormField label="Name">
-              <UInput v-model="form.name" class="w-full" />
+              <UInput v-model="form.name" class="w-full" :disabled="linked" />
             </UFormField>
             <UFormField label="Status">
               <USelect v-model="form.status" :items="selectOptions(BRAND_STATUSES)" class="w-full" />
@@ -366,7 +382,7 @@ async function saveProduct() {
                 <h2 class="font-semibold text-highlighted">
                   Products
                 </h2>
-                <UButton icon="i-lucide-plus" label="Add product" size="sm" @click="editProduct()" />
+                <UButton v-if="!linked" icon="i-lucide-plus" label="Add product" size="sm" @click="editProduct()" />
               </div>
             </template>
             <div class="-my-2 divide-y divide-default">
@@ -403,7 +419,10 @@ async function saveProduct() {
 
       <USlideover :open="productOpen" @update:open="requestProductOpen" :title="product.id ? product.name : 'New product'" :ui="{ content: 'max-w-xl' }">
         <template #body>
-          <div class="space-y-5">
+          <fieldset :disabled="linked" class="space-y-5">
+            <p v-if="linked" class="text-sm text-muted">
+              From {{ partner ?? 'your partner' }}: they keep it up to date.
+            </p>
             <UFormField label="Name" required help="Fills {{product}}">
               <UInput v-model="product.name" class="w-full" />
             </UFormField>
@@ -479,9 +498,9 @@ async function saveProduct() {
                 </p>
               </div>
             </div>
-          </div>
+          </fieldset>
         </template>
-        <template #footer>
+        <template v-if="!linked" #footer>
           <UButton label="Save product" :loading="saving" :disabled="!product.name.trim() || !product.slug" @click="saveProduct" />
         </template>
       </USlideover>
