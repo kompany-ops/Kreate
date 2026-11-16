@@ -71,8 +71,9 @@ export const useRefData = () => {
     const brand = productOf(productId)?.brand
     return formats.value.filter(format => !format.archived && (
       brand?.source_brand_id && brand.library_rule === 'brand_only'
-        ? format.brand_id === brand.id && !!format.source_id
-        : !format.brand_id || format.brand_id === brand?.id
+        // only what the partner shared: its formats for this brand, or an agency's own
+        ? !!format.source_id && (format.brand_id === brand.id || (!format.brand_id && format.partner_org_id === brand.partner_org_id))
+        : format.brand_id === brand?.id || (!format.brand_id && (!format.partner_org_id || format.partner_org_id === brand?.partner_org_id))
     ))
   }
 

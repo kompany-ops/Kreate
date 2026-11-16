@@ -49,11 +49,11 @@ export const useOrg = () => {
   }
 
   /** Start an account of a kind; its profile (who it is and how its scripts sound) is saved with it. */
-  async function createOrg(name: string, slug: string, profile?: OrgProfile, kind: 'creator' | 'brand' = 'creator') {
+  async function createOrg(name: string, slug: string, profile?: OrgProfile, kind: 'creator' | 'brand' | 'agency' = 'creator') {
     const { error } = await db.rpc('create_org', { p_name: name, p_slug: slug, p_profile: profile ? { ...profile } : {}, p_kind: kind })
     if (error) throw error
-    // a creator starts on Free in the Library; a brand on its Brand page
-    await enter(kind === 'brand' ? '/brand' : '/library')
+    // a creator starts on Free in the Library; a brand on its Brand page; an agency on its brands
+    await enter(kind === 'brand' ? '/brand' : kind === 'agency' ? '/brands' : '/library')
   }
 
   /** whether someone can start a new org (open: everyone starts on Free) */

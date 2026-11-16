@@ -82,6 +82,9 @@ export const PLANS: Record<PlanId, Plan> = {
 export const PLAN_ORDER: PlanId[] = ['free', 'starter', 'pro', 'studio']
 export const PAID_PLANS: PaidPlanId[] = ['starter', 'pro', 'studio']
 
+/** An agency account's plan (restructure Phase 6): many brands, a roster, its own Library; needed to invite creators. */
+export const AGENCY_PLAN = { title: 'Agency', price: 99, lookupKey: 'kreate_agency' } as const
+
 /** An extra team place on a paid plan. */
 export const TEAM_MEMBER = { price: 29.99, lookupKey: 'kreate_team_member' } as const
 

@@ -478,6 +478,7 @@ async function saveDefaults() {
           </UCard>
 
           <BillingSettings v-if="!isPublisher" />
+          <AgencyBilling v-else-if="access?.kind === 'agency'" />
         </template>
 
         <!-- Channels -->

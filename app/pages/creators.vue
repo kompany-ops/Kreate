@@ -14,14 +14,17 @@ const { confirmDialog } = useConfirm()
 const { isAdmin, isOwner, access } = useAccess()
 const route = useRoute()
 
-const brand = ref<Pick<Row<'brands'>, 'id' | 'name'> | null>(null)
+/** an agency runs several brands; a brand account has one */
+const agency = computed(() => access.value?.kind === 'agency')
+const ownBrands = ref<Pick<Row<'brands'>, 'id' | 'name'>[]>([])
+const brand = computed(() => ownBrands.value[0] ?? null)
 const partnerships = ref<Row<'partnerships'>[]>([])
 async function load() {
   const [b, p] = await Promise.all([
-    db.from('brands').select('id, name').is('source_brand_id', null).order('created_at').limit(1).maybeSingle(),
+    db.from('brands').select('id, name').is('source_brand_id', null).is('archived_at', null).order('name'),
     db.from('partnerships').select('*').order('created_at', { ascending: false })
   ])
-  brand.value = must(b)
+  ownBrands.value = must(b)
   partnerships.value = must(p)
   const [st, sub] = await Promise.all([
     db.from('seats').select('*').neq('status', 'ended'),
@@ -29,11 +32,13 @@ async function load() {
   ])
   seats.value = must(st)
   subscription.value = sub.data
-  // how many shoots each partnered creator has made for the brand (Results has the rest)
-  if (brand.value) {
-    const { data } = await db.rpc('partner_shoots', { p_brand_id: brand.value.id })
-    shootCounts.value = (data ?? []).reduce((counts, row) => counts.set(row.creator_name, (counts.get(row.creator_name) ?? 0) + 1), new Map<string, number>())
+  // how many shoots each partnered creator has made for the brand(s) (Results has the rest)
+  const counts = new Map<string, number>()
+  for (const own of ownBrands.value) {
+    const { data } = await db.rpc('partner_shoots', { p_brand_id: own.id })
+    for (const row of data ?? []) counts.set(row.creator_name, (counts.get(row.creator_name) ?? 0) + 1)
   }
+  shootCounts.value = counts
 }
 const shootCounts = ref(new Map<string, number>())
 const seats = ref<Row<'seats'>[]>([])
@@ -43,6 +48,9 @@ await load()
 // --- seats -----------------------------------------------------------------------
 const seatKind = computed<SeatKind>(() => access.value?.kind === 'agency' ? 'agency' : 'brand')
 const seatOf = (creatorOrgId: string | null) => seats.value.find(seat => seat.creator_org_id === creatorOrgId) ?? null
+/** a seat is per creator account: an agency's creator partnered on several brands shows it once */
+const firstActiveFor = (row: Row<'partnerships'>) =>
+  partnerships.value.find(other => other.status === 'active' && other.creator_org_id === row.creator_org_id)?.id === row.id
 const billingLive = computed(() => ['trialing', 'active', 'past_due'].includes(subscription.value?.status ?? ''))
 /** the price of the next seat, at the step the current count is on */
 const nextSeatPrice = computed(() => seatsTotal(seatKind.value, seats.value.length + 1) - seatsTotal(seatKind.value, seats.value.length))
@@ -92,6 +100,10 @@ const day = (value: string | null) => value ? new Date(value).toLocaleDateString
 
 // --- inviting ------------------------------------------------------------------
 const email = ref('')
+const inviteBrands = ref<string[]>([])
+watch(ownBrands, (list) => {
+  if (!inviteBrands.value.length && list[0]) inviteBrands.value = [list[0].id]
+}, { immediate: true })
 const inviting = ref(false)
 async function send(id: string, quiet = false) {
   try {
@@ -106,17 +118,23 @@ async function send(id: string, quiet = false) {
   }
 }
 async function invite() {
-  if (!brand.value) return
+  const brandIds = agency.value ? inviteBrands.value : brand.value ? [brand.value.id] : []
+  if (!brandIds.length) return
   inviting.value = true
   const address = email.value.trim().toLowerCase()
-  let id: string | null = null
+  const ids: string[] = []
   await run(async () => {
-    const { data, error } = await db.rpc('invite_partner', { p_brand_id: brand.value!.id, p_email: address })
-    if (error) throw error
-    id = data
+    // one partnership per brand, each its own invitation
+    for (const brandId of brandIds) {
+      const { data, error } = await db.rpc('invite_partner', { p_brand_id: brandId, p_email: address })
+      if (error) throw error
+      ids.push(data)
+    }
   })
-  if (id && await send(id, true)) {
-    toast.add({ title: `Invited ${address}`, description: 'We\'ve emailed them the invitation.', color: 'success' })
+  let emailed = 0
+  for (const id of ids) if (await send(id, true)) emailed++
+  if (ids.length && emailed === ids.length) {
+    toast.add({ title: `Invited ${address}`, description: ids.length > 1 ? `To ${ids.length} brands: we've emailed them each invitation.` : 'We\'ve emailed them the invitation.', color: 'success' })
     email.value = ''
   }
   inviting.value = false
@@ -159,12 +177,21 @@ async function end(row: Row<'partnerships'>) {
               Invite a creator
             </h2>
             <p class="text-sm text-muted">
-              They get {{ brand?.name ?? 'your brand' }}'s profile, products and Library in their own account, kept up to date as you change them. Their deal and their channels stay theirs.
+              They get {{ agency ? 'each brand you choose, with its profile, products and Library, and your own Library,' : `${brand?.name ?? 'your brand'}'s profile, products and Library` }} in their own account, kept up to date as you change them. Their deal and their channels stay theirs.
             </p>
           </template>
           <form class="flex flex-wrap gap-2" @submit.prevent="invite">
             <UInput v-model="email" type="email" placeholder="creator@example.com" class="min-w-0 flex-1" />
-            <UButton type="submit" label="Invite" icon="i-lucide-send" :loading="inviting" :disabled="!email.includes('@')" />
+            <USelectMenu
+              v-if="agency"
+              v-model="inviteBrands"
+              :items="ownBrands.map(own => ({ label: own.name, value: own.id }))"
+              value-key="value"
+              multiple
+              placeholder="Which brands?"
+              class="w-56"
+            />
+            <UButton type="submit" label="Invite" icon="i-lucide-send" :loading="inviting" :disabled="!email.includes('@') || (agency && !inviteBrands.length)" />
           </form>
         </UCard>
 
@@ -196,6 +223,7 @@ async function end(row: Row<'partnerships'>) {
               <div class="min-w-0 flex-1">
                 <p class="truncate font-medium text-highlighted">
                   {{ row.creator_name ?? row.invited_email }}
+                  <span v-if="agency" class="font-normal text-muted">· {{ row.brand_name }}</span>
                 </p>
                 <p class="text-sm text-muted">
                   <template v-if="row.status === 'active'">
@@ -212,7 +240,7 @@ async function end(row: Row<'partnerships'>) {
                   </template>
                 </p>
               </div>
-              <template v-if="row.status === 'active' && row.creator_org_id">
+              <template v-if="row.status === 'active' && row.creator_org_id && firstActiveFor(row)">
                 <UBadge v-if="seatOf(row.creator_org_id)?.status === 'pending'" label="Seat pending" color="warning" variant="subtle" size="sm" />
                 <USwitch
                   :model-value="!!seatOf(row.creator_org_id)"

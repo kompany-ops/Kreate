@@ -16,8 +16,14 @@ export function scopeFields(scope: string | null | undefined): { product_id: str
 
 /**
  * The PostgREST `or` filter for the Library items a product's shoots can use: that product's own,
- * its brand's, and the general ones.
+ * its brand's, the general ones, and, for a brand from an agency (`partnerOrgId`), the agency's own.
+ * A partner's own items never count as general.
  */
-export function libraryFilterFor(productId: string, brandId: string | null | undefined): string {
-  return `product_id.eq.${productId},and(product_id.is.null,brand_id.is.null)${brandId ? `,and(product_id.is.null,brand_id.eq.${brandId})` : ''}`
+export function libraryFilterFor(productId: string, brandId: string | null | undefined, partnerOrgId?: string | null): string {
+  return [
+    `product_id.eq.${productId}`,
+    'and(product_id.is.null,brand_id.is.null,partner_org_id.is.null)',
+    ...(brandId ? [`and(product_id.is.null,brand_id.eq.${brandId})`] : []),
+    ...(partnerOrgId ? [`and(product_id.is.null,brand_id.is.null,partner_org_id.eq.${partnerOrgId})`] : [])
+  ].join(',')
 }

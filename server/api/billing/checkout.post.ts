@@ -1,3 +1,5 @@
+import type { PaidPlanId } from '#shared/utils/plans'
+
 // Start a paid plan for the owner's org: Stripe-hosted Checkout with Managed Payments, and the org
 // on the subscription's metadata so the webhook knows whose it is. Pro has a 30-day trial the first
 // time (card on file). Moving between paid plans afterwards happens in the Customer Portal.
@@ -5,8 +7,11 @@ export default defineEventHandler(async (event) => {
   const { orgId } = await requireOrgOwner(event)
   const body = await readBody<{ plan?: string }>(event).catch(() => null)
   const planId = body?.plan
-  if (!isPaidPlan(planId)) throw createError({ statusCode: 400, statusMessage: 'Choose Starter, Pro or Studio.' })
-  const plan = PLANS[planId]
+  const { data: account } = await serviceDb(event).from('orgs').select('kind').eq('id', orgId).single()
+  // an agency account's one plan; a creator's Starter, Pro or Studio
+  const agency = account?.kind === 'agency'
+  if (agency ? planId !== 'agency' : !isPaidPlan(planId)) throw createError({ statusCode: 400, statusMessage: agency ? 'Agencies start the agency plan.' : 'Choose Starter, Pro or Studio.' })
+  const plan = agency ? { lookupKey: AGENCY_PLAN.lookupKey, trial: false } : PLANS[planId as PaidPlanId]
   const origin = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
 
   const { customer, subscription } = await ensureCustomer(event, orgId)

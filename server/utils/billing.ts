@@ -38,7 +38,8 @@ export async function syncSubscription(event: H3Event, subscriptionId: string) {
   if (!orgId) throw new Error(`No org for subscription ${subscriptionId}`)
   // the plan's item (its price's lookup key names the plan) and the team member add-on's, if any
   const items = subscription.items.data
-  const item = items.find(i => planForLookupKey(i.price.lookup_key)) ?? items[0]
+  const isAgencyItem = (lookupKey: string | null | undefined) => lookupKey === AGENCY_PLAN.lookupKey
+  const item = items.find(i => planForLookupKey(i.price.lookup_key) || isAgencyItem(i.price.lookup_key)) ?? items[0]
   const teamItem = items.find(i => i.price.lookup_key === TEAM_MEMBER.lookupKey)
   // a brand's or agency's seats: the seat price's quantity
   const seatItem = items.find(i => SEAT_LOOKUP_KEYS.includes(i.price.lookup_key ?? ''))
@@ -49,7 +50,7 @@ export async function syncSubscription(event: H3Event, subscriptionId: string) {
     stripe_subscription_id: subscription.id,
     status: subscription.status,
     price_id: item?.price.id ?? null,
-    plan: planForLookupKey(item?.price.lookup_key),
+    plan: planForLookupKey(item?.price.lookup_key) ?? (isAgencyItem(item?.price.lookup_key) ? 'agency' : null),
     extra_team: teamItem?.quantity ?? 0,
     seats: seatItem?.quantity ?? 0,
     current_period_end: seconds(item?.current_period_end),

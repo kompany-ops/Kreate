@@ -10,10 +10,11 @@ const { reset } = useAccess()
 const supabase = useSupabaseClient()
 const run = useAction()
 
-const kind = ref<'creator' | 'brand'>('creator')
+const kind = ref<'creator' | 'brand' | 'agency'>('creator')
 const KINDS = [
   { label: 'Creator', value: 'creator', description: 'You film the ads: plan shoots, combine takes, batch and post.' },
-  { label: 'Brand', value: 'brand', description: 'You make the product: share your brand, products and best hooks with creators. Free.' }
+  { label: 'Brand', value: 'brand', description: 'You make the product: share your brand, products and best hooks with creators. Free.' },
+  { label: 'Agency', value: 'agency', description: 'You run brands for others: give your roster of creators your brands and Library. $99 a month.' }
 ]
 const name = ref('')
 const slug = computed(() => slugify(name.value))
@@ -54,14 +55,17 @@ async function signOut() {
           <template v-if="kind === 'creator'">
             You'll be its owner, on Free until you choose a plan, and can invite your team and cast.
           </template>
-          <template v-else>
+          <template v-else-if="kind === 'brand'">
             You'll be its owner. Brand accounts are free: set up your brand, products and Library, and invite your team.
+          </template>
+          <template v-else>
+            You'll be its owner. Add your brands and Library, then start the agency plan to invite creators.
           </template>
           If your team is already here, ask them to invite you instead.
         </p>
       </div>
       <URadioGroup v-model="kind" :items="KINDS" variant="table" />
-      <UFormField :label="kind === 'brand' ? 'Brand name' : 'Account name'" required>
+      <UFormField :label="kind === 'brand' ? 'Brand name' : kind === 'agency' ? 'Agency name' : 'Account name'" required>
         <UInput v-model="name" class="w-full" autofocus />
       </UFormField>
 

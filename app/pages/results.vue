@@ -13,11 +13,18 @@ type PartnerShoot = {
 }
 type ItemResult = { kind: string, item_id: string, label: string, archived: boolean, shoots: number, winners: number, mids: number, losers: number }
 
-const brand = ref<{ id: string, name: string } | null>(null)
+// a brand account has one brand; an agency picks which of its brands (?brand=)
+const ownBrands = ref<{ id: string, name: string }[]>([])
+const brand = computed(() => ownBrands.value.find(own => own.id === route.query.brand) ?? ownBrands.value[0] ?? null)
+const brandOptions = computed(() => ownBrands.value.map(own => ({ label: own.name, value: own.id })))
+const brandId = computed({
+  get: () => brand.value?.id,
+  set: value => router.replace({ query: { ...route.query, brand: value } })
+})
 const shoots = ref<PartnerShoot[]>([])
 const items = ref<ItemResult[]>([])
 async function load() {
-  brand.value = must(await db.from('brands').select('id, name').is('source_brand_id', null).order('created_at').limit(1).maybeSingle())
+  ownBrands.value = must(await db.from('brands').select('id, name').is('source_brand_id', null).is('archived_at', null).order('name'))
   if (!brand.value) return
   const [s, i] = await Promise.all([
     db.rpc('partner_shoots', { p_brand_id: brand.value.id }),
@@ -27,6 +34,7 @@ async function load() {
   items.value = must(i) as ItemResult[]
 }
 await load()
+watch(() => route.query.brand, load)
 
 // filters, kept in the URL (?creator=, ?status=) so the Creators page can link here
 const creator = computed({
@@ -83,6 +91,7 @@ const day = (value: string | null) => value ? formatDate(value.slice(0, 10)) : '
               Shoots for {{ brand?.name ?? 'your brand' }}
             </h2>
             <div class="flex flex-wrap gap-2">
+              <USelect v-if="ownBrands.length > 1" v-model="brandId" :items="brandOptions" class="w-44" />
               <USelect v-model="creator" :items="creatorOptions" class="w-44" />
               <USelect v-model="status" :items="statusOptions" class="w-40" />
             </div>

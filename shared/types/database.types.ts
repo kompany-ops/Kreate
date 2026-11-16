@@ -329,6 +329,7 @@ export type Database = {
           name: string
           notes: string | null
           org_id: string
+          partner_org_id: string | null
           pay_types: string[]
           retainer_fee: number | null
           slug: string
@@ -359,6 +360,7 @@ export type Database = {
           name: string
           notes?: string | null
           org_id?: string
+          partner_org_id?: string | null
           pay_types?: string[]
           retainer_fee?: number | null
           slug: string
@@ -389,6 +391,7 @@ export type Database = {
           name?: string
           notes?: string | null
           org_id?: string
+          partner_org_id?: string | null
           pay_types?: string[]
           retainer_fee?: number | null
           slug?: string
@@ -600,6 +603,7 @@ export type Database = {
           mode: string
           notes: string | null
           org_id: string
+          partner_org_id: string | null
           product_id: string | null
           script: string
           shoot_id: string | null
@@ -618,6 +622,7 @@ export type Database = {
           mode: string
           notes?: string | null
           org_id?: string
+          partner_org_id?: string | null
           product_id?: string | null
           script: string
           shoot_id?: string | null
@@ -636,6 +641,7 @@ export type Database = {
           mode?: string
           notes?: string | null
           org_id?: string
+          partner_org_id?: string | null
           product_id?: string | null
           script?: string
           shoot_id?: string | null
@@ -747,6 +753,7 @@ export type Database = {
           kind: string
           name: string
           org_id: string
+          partner_org_id: string | null
           source_id: string | null
           source_url: string | null
           target_seconds: number | null
@@ -769,6 +776,7 @@ export type Database = {
           kind?: string
           name: string
           org_id?: string
+          partner_org_id?: string | null
           source_id?: string | null
           source_url?: string | null
           target_seconds?: number | null
@@ -791,6 +799,7 @@ export type Database = {
           kind?: string
           name?: string
           org_id?: string
+          partner_org_id?: string | null
           source_id?: string | null
           source_url?: string | null
           target_seconds?: number | null
@@ -826,6 +835,7 @@ export type Database = {
           id: string
           notes: string | null
           org_id: string
+          partner_org_id: string | null
           product_id: string | null
           script: string
           shoot_id: string | null
@@ -846,6 +856,7 @@ export type Database = {
           id?: string
           notes?: string | null
           org_id?: string
+          partner_org_id?: string | null
           product_id?: string | null
           script: string
           shoot_id?: string | null
@@ -866,6 +877,7 @@ export type Database = {
           id?: string
           notes?: string | null
           org_id?: string
+          partner_org_id?: string | null
           product_id?: string | null
           script?: string
           shoot_id?: string | null

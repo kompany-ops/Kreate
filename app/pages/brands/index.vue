@@ -56,6 +56,11 @@ async function loadPartners() {
   partnerOf.value = new Map(rows.map(row => [row.linked_brand_id!, row.publisher_name]))
 }
 const fromPartner = (brand: BrandRow) => brand.source_brand_id ? partnerOf.value.get(brand.id) ?? 'a partner' : null
+/** "From Calm Co" for a brand's own; "Via Paw Agency" for one an agency brings */
+const partnerLabel = (brand: BrandRow) => {
+  const partner = fromPartner(brand)
+  return partner ? `${partner === brand.name ? 'From' : 'Via'} ${partner}` : null
+}
 
 // invitations waiting for your email: accept one into this account, on the channels you choose
 type Invite = { id: string, publisher_name: string, brand_name: string, about: string | null, logo_url: string | null }
@@ -451,7 +456,7 @@ async function save() {
             </h2>
             <div class="flex shrink-0 items-center gap-1">
               <BrandStar :starred="brand.starred" :name="brand.name" @toggle="toggleStar(brand)" />
-              <UBadge v-if="fromPartner(brand)" :label="`From ${fromPartner(brand)}`" icon="i-lucide-handshake" color="secondary" variant="subtle" />
+              <UBadge v-if="partnerLabel(brand)" :label="partnerLabel(brand)!" icon="i-lucide-handshake" color="secondary" variant="subtle" />
               <UBadge v-if="brand.archived_at" label="Archived" color="neutral" variant="outline" />
               <UBadge v-else :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
             </div>

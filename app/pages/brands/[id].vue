@@ -6,7 +6,9 @@ const db = useDb()
 const run = useAction()
 const { channels, features, load } = useRefData()
 // a brand account's own brand: its profile and products, without a creator's deal
-const { isPublisher } = useAccess()
+const { isPublisher, access } = useAccess()
+/** a brand account's own brand: no deal (it is the brand). An agency keeps its deal with each brand. */
+const isBrandAccount = computed(() => access.value?.kind === 'brand')
 const brandId = route.params.id as string
 
 const brand = ref<Row<'brands'> | null>(null)
@@ -64,7 +66,7 @@ async function saveProfile() {
   savingProfile.value = true
   await run(async () => {
     must(await db.from('brands').update({
-      ...(isPublisher.value ? { name: form.name.trim() } : {}),
+      ...(isBrandAccount.value ? { name: form.name.trim() } : {}),
       about: profileForm.about.trim() || null,
       website_url: profileForm.website_url.trim() || null,
       logo_url: profileForm.logo_url.trim() || null,
@@ -228,16 +230,16 @@ async function saveProduct() {
   <UDashboardPanel v-if="brand" id="brand">
     <template #header>
       <UDashboardNavbar :title="brand.name">
-        <template v-if="!isPublisher" #leading>
+        <template v-if="!isBrandAccount" #leading>
           <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/brands" aria-label="Back to brands" />
         </template>
-        <template v-if="!isPublisher" #trailing>
+        <template v-if="!isBrandAccount" #trailing>
           <BrandStar :starred="brand.starred" :name="brand.name" size="sm" @toggle="toggleStar" />
           <UBadge v-if="brand.archived_at" label="Archived" color="neutral" variant="outline" />
           <UBadge v-else :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
         </template>
         <template #right>
-          <template v-if="!isPublisher">
+          <template v-if="!isBrandAccount">
           <UButton
             v-if="brand.archived_at"
             icon="i-lucide-archive-restore"
@@ -293,7 +295,7 @@ async function saveProduct() {
             </p>
           </template>
           <fieldset :disabled="linked" class="space-y-4">
-            <UFormField v-if="isPublisher" label="Name">
+            <UFormField v-if="isBrandAccount" label="Name">
               <UInput v-model="form.name" class="w-full" />
             </UFormField>
             <UFormField label="About">
@@ -316,13 +318,13 @@ async function saveProduct() {
             <UButton
               label="Save profile"
               :loading="savingProfile"
-              :disabled="(isPublisher && !form.name.trim()) || !isValidUrl(profileForm.website_url) || !isValidUrl(profileForm.logo_url)"
+              :disabled="(isBrandAccount && !form.name.trim()) || !isValidUrl(profileForm.website_url) || !isValidUrl(profileForm.logo_url)"
               @click="saveProfile"
             />
           </template>
         </UCard>
 
-        <UCard v-if="!isPublisher">
+        <UCard v-if="!isBrandAccount">
           <template #header>
             <h2 class="font-semibold text-highlighted">
               Your deal
@@ -353,7 +355,7 @@ async function saveProduct() {
         </div>
 
         <div class="space-y-6">
-          <BrandTrybeData v-if="!isPublisher" :data="brand.trybe_data" :brand-id="brand.trybe_brand_id" :trybe-url="brand.trybe_url" />
+          <BrandTrybeData v-if="!isBrandAccount" :data="brand.trybe_data" :brand-id="brand.trybe_brand_id" :trybe-url="brand.trybe_url" />
 
           <UCard v-if="!isPublisher">
             <template #header>

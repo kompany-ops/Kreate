@@ -22,9 +22,13 @@ onBeforeUnmount(() => {
   if (chatChannel) useSupabaseClient().removeChannel(chatChannel)
 })
 
+const { access } = useAccess()
 const items = computed<NavigationMenuItem[]>(() => isPublisher.value ? [
-  // a brand account: its brand (profile and products), its Library, chat and settings
-  { label: 'Brand', icon: 'i-lucide-store', to: '/brand', active: route.path === '/brand' || route.path.startsWith('/brands/') },
+  // a brand account: its brand (profile and products); an agency: its brands. Then its Library,
+  // the creators it partners with, their results, chat and settings
+  access.value?.kind === 'agency'
+    ? { label: 'Brands', icon: 'i-lucide-store', to: '/brands', active: route.path.startsWith('/brands') }
+    : { label: 'Brand', icon: 'i-lucide-store', to: '/brand', active: route.path === '/brand' || route.path.startsWith('/brands/') },
   { label: 'Library', icon: 'i-lucide-library', to: '/library' },
   { label: 'Creators', icon: 'i-lucide-users', to: '/creators' },
   { label: 'Results', icon: 'i-lucide-chart-column', to: '/results' },

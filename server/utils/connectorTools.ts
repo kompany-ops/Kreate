@@ -207,8 +207,8 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
         .eq('archived', false).order('code').limit(max)) ?? []).map(row => ({ ...row, link: link(paths.format(row.id)) })))
     }
     // a product's own, its brand's and the general ones; or everything when no product is given
-    const brandId = product_id ? (must(await db.from('products').select('brand_id').eq('id', product_id).maybeSingle()))?.brand_id : null
-    const forProduct = product_id ? libraryFilterFor(product_id, brandId) : null
+    const product = product_id ? must(await db.from('products').select('brand_id, brand:brands(partner_org_id)').eq('id', product_id).maybeSingle()) : null
+    const forProduct = product_id ? libraryFilterFor(product_id, product?.brand_id, (product?.brand as { partner_org_id: string | null } | null)?.partner_org_id) : null
     if (kind === 'hooks') {
       let hooks = db.from('hook_templates')
         .select('id, script, caption, tags, product_id, brand_id, hook_type:angles(name)')

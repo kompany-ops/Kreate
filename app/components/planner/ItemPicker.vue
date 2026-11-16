@@ -59,7 +59,7 @@ watch(open, async (isOpen) => {
     // general items, this brand's and this product's own; items written in other shoots stay with them
     const brand = productOf(props.productId)?.brand
     const brandId = brand?.id
-    const forThisShoot = libraryFilterFor(props.productId, brandId)
+    const forThisShoot = libraryFilterFor(props.productId, brandId, brand?.partner_org_id)
     // a partner brand that keeps its shoots to its own Library: only what it shared
     const brandOnly = !!brand?.source_brand_id && brand.library_rule === 'brand_only'
     if (props.kinds.includes('hook')) {

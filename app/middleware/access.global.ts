@@ -7,7 +7,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const user = useSupabaseUser()
   if (!user.value) return
 
-  const { ensure, isAdmin, isCast, isPublisher, reset } = useAccess()
+  const { ensure, isAdmin, isCast, isPublisher, access, reset } = useAccess()
   const { needsPicker, signupOpen } = useOrg()
   if (!(await ensure(user.value))) {
     if (await signupOpen()) return to.path === '/onboarding' ? undefined : navigateTo('/onboarding')
@@ -22,8 +22,11 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // Your account is theirs, whatever the organisation's state; it's also where they pick one
   if (to.path === '/account') return
   if (needsPicker.value) return navigateTo('/account')
-  // a brand account never shoots, and has one brand: its Brand page
-  if (isPublisher.value && (to.path === '/' || to.path.startsWith('/shoots') || to.path === '/brands')) return navigateTo('/brand')
+  // brand and agency accounts never shoot; a brand account has one brand (its Brand page), an agency many
+  const agency = access.value?.kind === 'agency'
+  if (isPublisher.value && (to.path === '/' || to.path.startsWith('/shoots') || (!agency && to.path === '/brands') || (agency && to.path === '/brand'))) {
+    return navigateTo(agency ? '/brands' : '/brand')
+  }
   // Creators and Results are a brand account's (the creators it partners with, and what they made)
   if (!isPublisher.value && (to.path === '/creators' || to.path === '/results')) return navigateTo('/brands')
   // the Library and Brands are the team's: cast land on their shoots
