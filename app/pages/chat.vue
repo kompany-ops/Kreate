@@ -88,6 +88,7 @@ const EVENT_ICONS: Record<string, string> = {
   shoot_filmed: 'i-lucide-film',
   shoot_editing: 'i-lucide-scissors',
   shoot_live: 'i-lucide-rocket',
+  shoot_back: 'i-lucide-undo-2',
   member_joined: 'i-lucide-user-plus',
   ai_drafts: 'i-lucide-sparkles'
 }

@@ -363,6 +363,7 @@ const CHAT_EVENTS = [
   { key: 'shoot_filmed', label: 'A shoot is filmed' },
   { key: 'shoot_editing', label: 'Editing starts' },
   { key: 'shoot_live', label: 'A shoot goes Live' },
+  { key: 'shoot_back', label: 'A shoot moves back (to draft, planned…)' },
   { key: 'member_joined', label: 'Someone joins' },
   { key: 'ai_drafts', label: 'An AI app adds drafts' }
 ] as const
