@@ -316,14 +316,25 @@ describe('VO takes', () => {
 })
 
 describe('performs', () => {
-  it('has a VO’s writer perform it on every channel, and its cast on the cast channel only', () => {
-    const vo = { kind: 'body' as const, writer_id: 'makayla', cast_ids: ['joe'], cast_channel_id: 'whiskey' }
-    expect(performs(vo, 'makayla', 'siblings')).toBe(true)
-    expect(performs(vo, 'joe', 'whiskey')).toBe(true)
-    expect(performs(vo, 'joe', 'siblings')).toBe(false)
-    expect(performs(vo, 'brennen', 'siblings')).toBe(false)
+  const channelPeople = { nix: ['brennen'], siblings: ['brennen', 'makayla'], whiskey: ['joe', 'makayla'] }
+  it('has everyone on a VO’s channel read it, there only', () => {
+    const vo = { kind: 'body' as const, writer_id: 'makayla', cast_channel_id: 'whiskey' }
+    expect(performs(vo, 'makayla', 'whiskey', channelPeople)).toBe(true)
+    expect(performs(vo, 'joe', 'whiskey', channelPeople)).toBe(true)
+    expect(performs(vo, 'makayla', 'siblings', channelPeople)).toBe(false)
+    // a channel only its writer is on: theirs alone
+    const solo = { kind: 'body' as const, writer_id: 'brennen', cast_channel_id: 'nix' }
+    expect(performs(solo, 'brennen', 'nix', channelPeople)).toBe(true)
+    expect(performs(solo, 'brennen', 'siblings', channelPeople)).toBe(false)
+  })
+  it('puts a VO with no channel on each of its writer’s channels, for everyone on them', () => {
+    const vo = { kind: 'body' as const, writer_id: 'brennen', cast_channel_id: null }
+    expect(performs(vo, 'brennen', 'nix', channelPeople)).toBe(true)
+    expect(performs(vo, 'brennen', 'siblings', channelPeople)).toBe(true)
+    expect(performs(vo, 'makayla', 'siblings', channelPeople)).toBe(true)
+    expect(performs(vo, 'joe', 'whiskey', channelPeople)).toBe(false)
     // hooks and CTAs: everyone
-    expect(performs({ kind: 'hook', writer_id: null }, 'brennen', 'nix')).toBe(true)
+    expect(performs({ kind: 'hook', writer_id: null }, 'brennen', 'nix', channelPeople)).toBe(true)
   })
 })
 

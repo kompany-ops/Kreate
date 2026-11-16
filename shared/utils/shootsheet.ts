@@ -59,11 +59,9 @@ export interface BundleItem {
   /** hooks: suggested post caption, copied from the template like the script and frozen when planned */
   caption?: string | null
   title?: string | null
-  /** VOs: the person on the cast who wrote it; they perform it. Null = anyone. */
+  /** VOs: the person on the cast who wrote it. Null = anyone. */
   writer_id?: string | null
-  /** VOs: people cast on it with the writer, who perform it too (same script, beat for beat) */
-  cast_ids?: string[]
-  /** VOs: the channel it's cast on: the cast perform it there only */
+  /** VOs: the channel it's for (one of the writer's): everyone on it reads it, there only. Null = each of the writer's */
   cast_channel_id?: string | null
   /** the Library template's source link, if it has one */
   source_url?: string | null
@@ -197,13 +195,23 @@ export interface ShootBundle {
 
 /** H = hook, V = body (VO), C = CTA */
 /**
- * Who performs an item (on a channel, when given): everyone, or for a VO its writer (on each of
- * their channels) and the people cast on it (on its cast channel only).
+ * Whether someone on a channel performs an item there (callers only ask about channels the person
+ * is on). Hooks and CTAs: everyone. A VO is read by everyone on its channel: the one picked for it
+ * (`cast_channel_id`, one of its writer's), or with none, each channel its writer is on. So a VO
+ * for a channel only its writer is on is theirs alone, and one for a shared channel is read by
+ * everyone on it, whose beats can then be mixed. `channelPeople` (who on the shoot is on each
+ * channel) finds the writer's channels; without it, only the writer reads a VO with no channel.
  */
-export function performs(item: Pick<BundleItem, 'kind' | 'writer_id' | 'cast_ids' | 'cast_channel_id'>, personId: string, channelId?: string | null): boolean {
+export function performs(
+  item: Pick<BundleItem, 'kind' | 'writer_id' | 'cast_channel_id'>,
+  personId: string,
+  channelId: string | null,
+  channelPeople?: Record<string, string[]>
+): boolean {
   if (item.kind !== 'body' || !item.writer_id) return true
+  if (item.cast_channel_id) return channelId === item.cast_channel_id
   if (item.writer_id === personId) return true
-  return !!item.cast_ids?.includes(personId) && (channelId === undefined || channelId === item.cast_channel_id)
+  return !!channelId && !!channelPeople?.[channelId]?.includes(item.writer_id)
 }
 
 export function itemPrefix(kind: ItemKind): 'H' | 'V' | 'C' {

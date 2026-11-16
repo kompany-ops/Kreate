@@ -52,10 +52,10 @@ const linkedHooks = computed(() => primary.value.kind === 'body' ? linkedCodes(p
 const linkedCtas = computed(() => primary.value.kind === 'body' ? linkedCodes(props.bundle, primary.value, 'cta') : null)
 
 const personName = (id: string) => props.bundle.people.find(person => person.id === id)?.name ?? 'Unknown'
-/** a VO one person on the cast wrote for themselves: only they perform it */
+/** a VO's writer */
 const writer = computed(() => primary.value.writer_id ? personName(primary.value.writer_id) : null)
-/** a VO's writer and the people cast on it: they all perform it */
-const performers = computed(() => primary.value.writer_id ? [primary.value.writer_id, ...(primary.value.cast_ids ?? [])].map(personName) : [])
+/** everyone who reads a VO: the people on its channel (or on each of its writer's) */
+const performers = computed(() => primary.value.writer_id ? [...new Set(props.group.items.map(item => item.person_id))].map(personName) : [])
 const overrides = computed(() => props.group.items.filter(item => item.script_override !== null && item.script_override !== undefined).length)
 const done = computed(() => props.group.items.filter(item => item.status !== 'planned').length)
 const unfilled = computed(() => {
@@ -249,7 +249,7 @@ const editItems = computed<DropdownMenuItem[]>(() => [
           <UBadge v-if="linkedCtas" :label="linkedCtas.length ? `Only with ${linkedCtas.join(', ')}` : 'Linked CTAs not on this shoot'" icon="i-lucide-link" :color="linkedCtas.length ? 'secondary' : 'error'" variant="subtle" size="sm" />
           <UBadge v-if="primary.hook_type" :label="primary.hook_type" color="neutral" variant="subtle" size="sm" />
           <UBadge v-if="primary.format" :label="primary.format.kind === 'standalone' ? `${primary.format.code} · standalone` : primary.format.code" color="info" variant="subtle" size="sm" />
-          <UBadge v-if="writer" :label="performers.length > 1 && primary.cast_channel_id ? `${performers.join(' + ')} · ${channelName(primary.cast_channel_id)}` : performers.join(' + ')" :icon="performers.length > 1 ? 'i-lucide-users' : 'i-lucide-user'" color="primary" variant="subtle" size="sm" />
+          <UBadge v-if="writer" :label="primary.cast_channel_id ? `${performers.join(' + ')} · ${channelName(primary.cast_channel_id)}` : performers.join(' + ')" :icon="performers.length > 1 ? 'i-lucide-users' : 'i-lucide-user'" color="primary" variant="subtle" size="sm" />
           <UBadge v-if="primary.cta_mode" :label="primary.cta_mode" color="info" variant="subtle" size="sm" />
           <SourceLink :url="primary.source_url ?? null" />
           <UBadge
@@ -329,11 +329,12 @@ const editItems = computed<DropdownMenuItem[]>(() => [
     <div v-if="expanded" class="mt-2 divide-y divide-default rounded-lg border border-default sm:ml-12">
       <p class="px-3 py-1.5 text-xs text-muted">
         <template v-if="writer">
+          {{ writer }} wrote it{{ primary.cast_channel_id ? ` for ${channelName(primary.cast_channel_id)}` : '' }}.
           <template v-if="performers.length > 1">
-            Performed by {{ performers.join(', ') }}: {{ writer }} wrote it, and it's cast on {{ channelName(primary.cast_channel_id ?? null) }}, where the others perform it and their beats can be mixed.
+            Read by {{ performers.join(', ') }}: everyone on {{ primary.cast_channel_id ? 'that channel' : `${writer}'s channels` }}, and their beats can be mixed.
           </template>
           <template v-else>
-            Only {{ writer }} performs this: they wrote it.
+            Only {{ writer }} reads it{{ primary.cast_channel_id ? '' : ', on each of their channels' }}.
           </template>
         </template>
         <template v-else>

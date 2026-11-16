@@ -5,15 +5,15 @@ import type { Json } from '#shared/types/database.types'
 
 // Slide-over editor for a VO, inside a shoot: VOs are only written here. Every VO is for the
 // shoot's product, about one of its core features or the product as a whole, and is written by
-// the signed-in user's person on the cast: only they perform it, and only they (or an admin) can
-// edit it. Open it with `edit(row)`, or `edit({ format_id })` to start a new VO in a format.
+// the signed-in user's person on the cast, for one of their channels (or all of them): everyone on
+// that channel reads it. Only its writer (or an admin) can edit it. Open it with `edit(row)`, or `edit({ format_id })` to start a new VO in a format.
 // Saving emits the saved VO; the shoot puts it on the plan.
 const props = defineProps<{
   shootId: string
   productId: string
   /** the people on the shoot: a VO's writer has to be one of them */
   people: { id: string, name: string }[]
-  /** the shoot's channels and who on the shoot films each: a VO is cast on people who share one with its writer */
+  /** the shoot's channels and who on the shoot films each: everyone on a VO's channel reads it */
   channels: { id: string, name: string }[]
   channelPeople: Record<string, string[]>
 }>()
@@ -120,27 +120,16 @@ const form = reactive({
   format_id: undefined as string | undefined,
   person_id: undefined as string | undefined,
   feature: GENERAL as string,
-  /** the channel it's cast on: its cast are all on it, and perform it there only */
+  /** the channel it's for (one of its writer's): everyone on it reads it, there only. None: each of the writer's */
   cast_channel: undefined as string | undefined,
-  cast: [] as string[],
   beats: [] as Beat[],
   tags: [] as string[],
   notes: '',
   source_url: ''
 })
 const requestOpen = useGuardedClose(open, form)
-/** the cast when it was opened, so saving only changes what changed */
-const savedLinks = { cast: [] as string[] }
 
 async function edit(row?: Partial<Row<'body_templates'>>) {
-  let cast: string[] = []
-  if (row?.id) {
-    const ok = await run(async () => {
-      cast = must(await db.from('vo_cast').select('person_id').eq('body_template_id', row.id!)).map(member => member.person_id)
-    })
-    if (!ok) return
-  }
-  Object.assign(savedLinks, { cast })
   Object.assign(form, {
     id: row?.id ?? '',
     format_id: row?.format_id ?? formatOptions.value[0]?.value,
@@ -150,8 +139,6 @@ async function edit(row?: Partial<Row<'body_templates'>>) {
       : props.people.some(person => person.id === me.value?.id) ? me.value?.id : undefined,
     feature: row?.feature_id ?? GENERAL,
     cast_channel: row?.cast_channel_id ?? undefined,
-    // only people on this shoot can be cast or uncast here; others are kept
-    cast: cast.filter(id => props.people.some(person => person.id === id)),
     beats: parseBeats(row?.beats),
     tags: [...(row?.tags ?? [])],
     notes: row?.notes ?? '',
@@ -178,22 +165,23 @@ watch(() => [form.format_id, open.value] as const, () => {
 })
 
 /**
- * A VO is cast on one channel: the writer's, picked first. Then anyone on the shoot who's on that
- * channel too can be cast; they record the same script, beat for beat, and perform it on that
- * channel only, where their beats can be mixed (cast mixes).
+ * A VO is for one of its writer's channels, or all of them. Everyone on the shoot who's on that
+ * channel reads it, beat for beat, there only, and their beats can be mixed (cast mixes): a
+ * channel only the writer is on makes it theirs alone.
  */
 const castChannelOptions = computed(() => props.channels
   .filter(channel => !!form.person_id && props.channelPeople[channel.id]?.includes(form.person_id))
   .map(channel => ({ label: channel.name, value: channel.id })))
-const castOptions = computed(() => props.people
-  .filter(person => person.id !== form.person_id && !!form.cast_channel && props.channelPeople[form.cast_channel]?.includes(person.id))
-  .map(person => ({ label: person.name, value: person.id })))
-// a new writer may not be on the cast channel; a new channel keeps only the cast who are on it
+// a new writer may not be on the channel
 watch(() => form.person_id, () => {
   if (form.cast_channel && !castChannelOptions.value.some(option => option.value === form.cast_channel)) form.cast_channel = undefined
 })
-watch(() => [form.cast_channel, form.person_id], () => {
-  form.cast = form.cast.filter(id => castOptions.value.some(option => option.value === id))
+/** who reads it: everyone on its channel, or on each of the writer's */
+const readers = computed(() => {
+  const channelIds = form.cast_channel ? [form.cast_channel] : castChannelOptions.value.map(option => option.value)
+  const ids = new Set(channelIds.flatMap(id => props.channelPeople[id] ?? []))
+  if (form.person_id) ids.add(form.person_id)
+  return props.people.filter(person => ids.has(person.id)).map(person => person.name)
 })
 
 const featureId = computed(() => form.feature === GENERAL ? null : form.feature)
@@ -227,14 +215,6 @@ const cleanBeat = (beat: Beat): Beat => {
   }
 }
 
-/** Make the cast match the picks, for the people this editor can see (ones on this shoot). */
-async function syncCast(voId: string, before: string[], after: string[], onShoot: string[]) {
-  const removed = before.filter(id => !after.includes(id) && onShoot.includes(id))
-  const added = after.filter(id => !before.includes(id))
-  if (removed.length) must(await db.from('vo_cast').delete().eq('body_template_id', voId).in('person_id', removed))
-  if (added.length) must(await db.from('vo_cast').insert(added.map(person_id => ({ body_template_id: voId, person_id }))))
-}
-
 async function save() {
   saving.value = true
   let saved: Row<'body_templates'> | null = null
@@ -244,8 +224,7 @@ async function save() {
       format_id: form.format_id!,
       product_id: props.productId,
       feature_id: featureId.value,
-      // no cast, no cast channel
-      cast_channel_id: form.cast.length ? form.cast_channel ?? null : null,
+      cast_channel_id: form.cast_channel ?? null,
       beats: form.beats.map(cleanBeat) as unknown as Json,
       est_seconds: estSeconds.value || null,
       tags: form.tags,
@@ -255,7 +234,6 @@ async function save() {
     saved = form.id
       ? mustOne(await db.from('body_templates').update(fields).eq('id', form.id).select('*').single())
       : mustOne(await db.from('body_templates').insert({ ...fields, person_id: form.person_id!, shoot_id: props.shootId }).select('*').single())
-    await syncCast(saved.id, savedLinks.cast, form.cast, props.people.map(person => person.id))
   }, 'VO saved')
   saving.value = false
   if (ok && saved) {
@@ -282,12 +260,12 @@ async function save() {
     <template #body>
       <div class="space-y-5">
         <UAlert v-if="blocked" color="warning" variant="subtle" icon="i-lucide-lock" :description="blocked" />
-        <UFormField v-else-if="choosesWriter" label="Written by" required help="As part of the team you can write a VO for anyone on the shoot. Only they perform it.">
+        <UFormField v-else-if="choosesWriter" label="Written by" required help="As part of the team you can write a VO for anyone on the shoot.">
           <USelectMenu v-model="form.person_id" :items="writerOptions" value-key="value" placeholder="Pick someone on the shoot" class="w-full" />
         </UFormField>
         <p v-else class="flex items-center gap-1.5 text-sm text-muted">
           <UIcon name="i-lucide-user" class="size-4" />
-          Written by <span class="font-medium text-highlighted">{{ personName(form.person_id) }}</span>, who alone performs it.
+          Written by <span class="font-medium text-highlighted">{{ personName(form.person_id) }}</span>.
         </p>
 
         <fieldset :disabled="readonly" class="space-y-5">
@@ -298,26 +276,19 @@ async function save() {
             <UFormField label="Format" required class="sm:col-span-2">
               <USelect v-model="form.format_id" :items="formatOptions" class="w-full" :disabled="readonly" />
             </UFormField>
-            <UFormField label="Cast on" help="The writer's channel the cast perform it on">
+            <UFormField
+              label="Channel"
+              class="sm:col-span-2"
+              :help="readers.length ? `Read by ${readers.join(', ')}: everyone on ${form.cast_channel ? 'it' : 'the writer\'s channels'}, and their beats can be mixed (Cast mixes in General)` : 'Everyone on the channel reads it there'"
+            >
               <USelectMenu
                 v-model="form.cast_channel"
                 :items="castChannelOptions"
                 value-key="value"
-                placeholder="No cast"
+                placeholder="All of the writer's channels"
                 class="w-full"
                 :clear="!!form.cast_channel"
                 :disabled="readonly || !castChannelOptions.length"
-              />
-            </UFormField>
-            <UFormField label="Cast with" help="On that channel: they record the same script, and their beats can be mixed (Cast mixes in General)">
-              <USelectMenu
-                v-model="form.cast"
-                :items="castOptions"
-                value-key="value"
-                multiple
-                :placeholder="form.cast_channel ? (castOptions.length ? 'Just the writer' : 'Nobody else is on it') : 'Pick a channel first'"
-                class="w-full"
-                :disabled="readonly || !form.cast_channel || !castOptions.length"
               />
             </UFormField>
           </div>

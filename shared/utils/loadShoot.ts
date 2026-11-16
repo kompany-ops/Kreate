@@ -44,7 +44,6 @@ export type ItemRow = Row<'shoot_items'> & {
   hook: { filming_notes: string | null, source_url: string | null, shoot_id: string | null, product_id: string | null, hook_type: { name: string } | null } | null
   cta: { source_url: string | null, shoot_id: string | null, product_id: string | null } | null
   body: {
-    cast: { person_id: string }[]
     cast_channel_id: string | null
     hook_links: { hook_template_id: string }[]
     cta_links: { cta_template_id: string }[]
@@ -64,7 +63,7 @@ export type ItemRow = Row<'shoot_items'> & {
 export const ITEM_SELECT = `*,
   hook:hook_templates(filming_notes, source_url, shoot_id, product_id, hook_type:angles(name)),
   cta:cta_templates(source_url, shoot_id, product_id),
-  body:body_templates(cast:vo_cast(person_id), cast_channel_id, hook_links:vo_hook_links(hook_template_id), cta_links:vo_cta_links(cta_template_id), title, feature:product_features(name, slug), person_id, source_url, format:formats(id, code, name, description, cta_modes, beats, beat_descriptions, beat_examples, beat_broll, kind, beat_display, source_url))`
+  body:body_templates(cast_channel_id, hook_links:vo_hook_links(hook_template_id), cta_links:vo_cta_links(cta_template_id), title, feature:product_features(name, slug), person_id, source_url, format:formats(id, code, name, description, cta_modes, beats, beat_descriptions, beat_examples, beat_broll, kind, beat_display, source_url))`
 
 function unwrap<T>(result: { data: T | null, error: { message: string } | null }): T {
   if (result.error) throw new Error(result.error.message)
@@ -97,7 +96,6 @@ export function toBundleItem(row: ItemRow): BundleItem {
     // a VO is known by the product feature it's about (older VOs by their title)
     title: row.body?.feature?.name ?? row.body?.title ?? null,
     writer_id: row.body?.person_id ?? null,
-    cast_ids: row.body?.cast.map(member => member.person_id) ?? [],
     cast_channel_id: row.body?.cast_channel_id ?? null,
     source_url: row.hook?.source_url ?? row.body?.source_url ?? row.cta?.source_url ?? null,
     format: row.body?.format ?? null

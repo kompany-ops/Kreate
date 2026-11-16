@@ -370,7 +370,7 @@ export function registerShootTools(kit: ShootToolKit) {
 
   server.registerTool('edit_shot_list', {
     title: 'Edit shot list',
-    description: 'Change entries on a shoot\'s shot list, by code (H01, V02, C01): where it\'s filmed, its wording for everyone on this shoot, one person\'s own wording, and, for a hook or CTA, its wording in the Library for good or keeping one written here for the product\'s later shoots. A VO\'s own wording, writer\'s cast and alternates change with update_vo.',
+    description: 'Change entries on a shoot\'s shot list, by code (H01, V02, C01): where it\'s filmed, its wording for everyone on this shoot, one person\'s own wording, and, for a hook or CTA, its wording in the Library for good or keeping one written here for the product\'s later shoots. A VO\'s own wording, channel and alternates change with update_vo.',
     inputSchema: z.object({
       shoot: shootArg,
       entries: z.array(z.object({
@@ -473,15 +473,14 @@ export function registerShootTools(kit: ShootToolKit) {
   // --- VOs ------------------------------------------------------------------------------------------
   server.registerTool('update_vo', {
     title: 'Update VO',
-    description: 'Change a VO on a shoot: its beats (with alternate wordings), title, feature, notes, source link and cast (other people on the shoot who perform it too, on one channel they share with its writer), and put it on the shot list. Only its writer or the team can. A VO on the shot list of a draft keeps its lines in step.',
+    description: 'Change a VO on a shoot: its beats (with alternate wordings), title, feature, notes, source link and channel (one its writer is on: everyone on the shoot who is on it reads the VO, there only; with none, everyone on each of the writer\'s channels reads it there), and put it on the shot list. Only its writer or the team can. A VO on the shot list of a draft keeps its lines in step.',
     inputSchema: z.object({
       shoot: shootArg,
       vo: z.string().min(2).max(60).describe('The VO\'s code on the shot list (e.g. V02) or its id (from add_vo)'),
       beats: z.array(beatInput).min(1).max(20).optional().describe('Every beat of its format, in order'),
       title: z.string().max(120).nullable().optional(),
       feature: z.string().max(120).nullable().optional().describe('The product feature it\'s about, by name (null: the product as a whole)'),
-      cast: z.array(z.string().max(120)).max(20).optional().describe('People on the shoot cast on it with its writer, by name, replacing the list ([] for none)'),
-      cast_channel: z.string().max(120).optional().describe('The channel the cast perform it on: one the writer and the cast are all on'),
+      channel: z.string().max(120).nullable().optional().describe('The channel it\'s for, by name: one its writer is on, and everyone on it reads it (null: each of the writer\'s channels)'),
       notes: z.string().max(4000).nullable().optional(),
       source_url: z.string().url().max(500).nullable().optional().describe('A reference video'),
       on_plan: z.boolean().optional().describe('true: put it on the shot list (a draft VO from add_vo isn\'t on it yet)'),
@@ -489,7 +488,7 @@ export function registerShootTools(kit: ShootToolKit) {
     }),
     annotations: { readOnlyHint: false, destructiveHint: false }
   }, guarded(async (input: {
-    shoot: string, vo: string, beats?: BeatInput[], title?: string | null, feature?: string | null, cast?: string[], cast_channel?: string,
+    shoot: string, vo: string, beats?: BeatInput[], title?: string | null, feature?: string | null, channel?: string | null,
     notes?: string | null, source_url?: string | null, on_plan?: boolean, organisation?: string
   }, org, db) => {
     let bundle = await loadShoot(db, input.shoot)
@@ -520,26 +519,16 @@ export function registerShootTools(kit: ShootToolKit) {
         patch.feature_id = feature.id
       }
     }
-    // the cast: people on the shoot who share the cast channel with the writer
-    let castIds: string[] | null = null
-    if (input.cast !== undefined || input.cast_channel !== undefined) {
-      const current = list(await db.from('vo_cast').select('person_id').eq('body_template_id', vo.id)).map(row => row.person_id)
-      castIds = input.cast !== undefined ? byNames(bundle.people, input.cast, `person on ${bundle.shoot.code}`).map(person => person.id) : current
-      const channelId = input.cast_channel !== undefined
-        ? byNames(bundle.channels, [input.cast_channel], `channel on ${bundle.shoot.code}`)[0]!.id
-        : vo.cast_channel_id
-      if (castIds.length) {
-        if (!channelId) return failure('Say which channel the cast perform it on (cast_channel).')
-        const onChannel = bundle.channelPeople?.[channelId] ?? []
-        const off = [vo.person_id, ...castIds].filter((id): id is string => !!id && !onChannel.includes(id))
-        if (off.length) return failure(`${off.map(id => bundle.people.find(person => person.id === id)?.name ?? 'Someone').join(', ')} ${off.length === 1 ? 'isn\'t' : 'aren\'t'} on that channel.`)
-        if (castIds.includes(vo.person_id ?? '')) return failure('The writer performs it already: cast other people.')
+    // its channel: one its writer is on; everyone on it reads the VO
+    if (input.channel !== undefined) {
+      if (input.channel === null) patch.cast_channel_id = null
+      else {
+        const channelId = byNames(bundle.channels, [input.channel], `channel on ${bundle.shoot.code}`)[0]!.id
+        if (!vo.person_id || !(bundle.channelPeople?.[channelId] ?? []).includes(vo.person_id)) {
+          return failure(`Its writer isn't on ${input.channel}: pick one of their channels.`)
+        }
+        patch.cast_channel_id = channelId
       }
-      patch.cast_channel_id = castIds.length ? channelId : null
-      const removed = current.filter(id => !castIds!.includes(id) && bundle.people.some(person => person.id === id))
-      const added = castIds.filter(id => !current.includes(id))
-      if (removed.length) check(await db.from('vo_cast').delete().eq('body_template_id', vo.id).in('person_id', removed))
-      if (added.length) check(await db.from('vo_cast').insert(added.map(person_id => ({ body_template_id: vo.id, person_id }))))
     }
     const saved = (Object.keys(patch).length
       ? check(await db.from('body_templates').update(patch).eq('id', vo.id).select('*').single())
@@ -556,7 +545,7 @@ export function registerShootTools(kit: ShootToolKit) {
       shoot: bundle.shoot.code,
       code,
       on_shot_list: !!code,
-      changed: [...Object.keys(patch), ...(castIds ? ['cast'] : [])],
+      changed: Object.keys(patch),
       link: link(paths.vo(bundle.shoot.code, vo.id))
     })
   }))

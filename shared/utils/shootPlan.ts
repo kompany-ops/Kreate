@@ -47,9 +47,9 @@ export function copyFor(shootId: string, group: ShotGroup, personId: string, cha
 
 /**
  * Make sure everyone on a draft shoot has an item for every shot-list entry on every one of the
- * shoot's channels they're linked to (apart from VOs someone else wrote for themselves). Runs
- * after people or channels change, and when a draft opens. The links are read fresh. Returns how
- * many items it added.
+ * shoot's channels they're linked to, a VO only where they read it (performs), and no VO line
+ * where they don't. Runs after people or channels change, and when a draft opens. The links are
+ * read fresh. Returns how many items it added or took off.
  */
 export async function fillMissingItems(db: Db, bundle: LoadedShoot): Promise<number> {
   const groups = groupShotList(bundle.items)
@@ -57,13 +57,19 @@ export async function fillMissingItems(db: Db, bundle: LoadedShoot): Promise<num
   const channelIds = bundle.channels.map(channel => channel.id)
   if (bundle.shoot.status !== 'draft' || !groups.length || !personIds.length || !channelIds.length) return 0
   const links = list(await db.from('person_channels').select('person_id, channel_id').in('person_id', personIds).in('channel_id', channelIds))
+  const channelPeople: Record<string, string[]> = {}
+  for (const link of links) channelPeople[link.channel_id] = [...(channelPeople[link.channel_id] ?? []), link.person_id]
   const have = new Set(bundle.items.map(item => `${item.template_id}|${item.person_id}|${item.channel_id}`))
   const rows = groups.flatMap(group => links
-    .filter(link => performs(group.items[0]!, link.person_id, link.channel_id))
+    .filter(link => performs(group.items[0]!, link.person_id, link.channel_id, channelPeople))
     .filter(link => !have.has(`${group.template_id}|${link.person_id}|${link.channel_id}`))
     .map(link => copyFor(bundle.shoot.id, group, link.person_id, link.channel_id)))
   if (rows.length) check(await db.from('shoot_items').insert(rows))
-  return rows.length
+  // VO lines for people who no longer read it there (its channel changed, or who's on it)
+  const gone = groups.filter(group => group.kind === 'body').flatMap(group => group.items)
+    .filter(item => !performs(item, item.person_id, item.channel_id, channelPeople))
+  if (gone.length) await deleteIds(db, 'shoot_items', gone.map(item => item.id))
+  return rows.length + gone.length
 }
 
 /** Who's on the shoot: people taken off lose their items (cascade). Returns who was added and removed. */
@@ -99,7 +105,7 @@ export interface PickedItems {
 
 /**
  * Put hooks, VOs and CTAs on the shot list: one entry each with its own code, and an item per
- * person per channel they film (a VO: its writer everywhere, its cast on the cast channel). A VO
+ * person per channel they film (a VO: everyone on its channel, or on each of its writer's). A VO
  * linked to hooks / CTAs only goes with those, so they come on with it. Ones already on are
  * skipped. Returns the entries added (kind and code).
  */
@@ -108,12 +114,8 @@ export async function addToShotList(db: Db, bundle: LoadedShoot, input: PickedIt
   const groups = groupShotList(bundle.items)
   const existing = groups.map(group => group.template_id)
   let picked = input
-  const cast = new Map<string, string[]>()
   if (picked.bodies.length) {
     const voIds = picked.bodies.map(body => body.id)
-    for (const member of list(await db.from('vo_cast').select('body_template_id, person_id').in('body_template_id', voIds))) {
-      cast.set(member.body_template_id, [...(cast.get(member.body_template_id) ?? []), member.person_id])
-    }
     const have = new Set([...existing, ...picked.hooks.map(hook => hook.id), ...picked.ctas.map(cta => cta.id)])
     const hookIds = list(await db.from('vo_hook_links').select('hook_template_id').in('body_template_id', voIds))
       .map(link => link.hook_template_id).filter(id => !have.has(id))
@@ -141,11 +143,11 @@ export async function addToShotList(db: Db, bundle: LoadedShoot, input: PickedIt
     entries.push({ template_id: hook.id, kind: 'hook', hook_template_id: hook.id, code: take(itemPrefix('hook')), script_snapshot: hook.script, caption: hook.caption, sort_order: ++order })
   }
   for (const body of fresh(picked.bodies)) {
-    const vo = { kind: 'body' as const, writer_id: body.person_id, cast_ids: cast.get(body.id) ?? [], cast_channel_id: body.cast_channel_id }
+    const vo = { kind: 'body' as const, writer_id: body.person_id, cast_channel_id: body.cast_channel_id }
     entries.push({
       template_id: body.id,
       kind: 'body', body_template_id: body.id, code: take('V'), script_snapshot: body.beats, sort_order: ++order,
-      performs: (personId, channelId) => performs(vo, personId, channelId)
+      performs: (personId, channelId) => performs(vo, personId, channelId, bundle.channelPeople)
     })
   }
   for (const cta of fresh(picked.ctas)) {
@@ -198,22 +200,21 @@ export async function removeFormat(db: Db, bundle: LoadedShoot, formatId: string
 }
 
 /**
- * After a VO on the shot list is saved: its lines take the new beats, and who performs it where
- * follows its writer and cast (lines for anyone taken off go, anyone added gets theirs). A VO
+ * After a VO on the shot list is saved: its lines take the new beats, and who reads it where
+ * follows its channel (lines for anyone no longer reading it go, anyone new gets theirs). A VO
  * not on the shot list yet is put on it.
  */
 export async function syncVoOnPlan(db: Db, bundle: LoadedShoot, vo: Row<'body_templates'>) {
   const group = groupsOfKind(bundle, 'body').find(entry => entry.template_id === vo.id)
   if (!group) return addToShotList(db, bundle, { hooks: [], bodies: [vo], ctas: [] })
   check(await db.from('shoot_items').update({ script_snapshot: vo.beats }).in('id', group.items.map(item => item.id)))
-  const cast = list(await db.from('vo_cast').select('person_id').eq('body_template_id', vo.id)).map(member => member.person_id)
-  const plays = { kind: 'body' as const, writer_id: vo.person_id, cast_ids: cast, cast_channel_id: vo.cast_channel_id }
-  const gone = group.items.filter(item => !performs(plays, item.person_id, item.channel_id))
+  const plays = { kind: 'body' as const, writer_id: vo.person_id, cast_channel_id: vo.cast_channel_id }
+  const gone = group.items.filter(item => !performs(plays, item.person_id, item.channel_id, bundle.channelPeople))
   if (gone.length) await deleteIds(db, 'shoot_items', gone.map(item => item.id))
   const have = new Set(group.items.map(item => `${item.person_id}|${item.channel_id}`))
-  const rows = [vo.person_id, ...cast].filter((id): id is string => !!id && bundle.people.some(person => person.id === id))
+  const rows = bundle.people.map(person => person.id)
     .flatMap(personId => channelsFor(bundle, personId)
-      .filter(channel => performs(plays, personId, channel.id) && !have.has(`${personId}|${channel.id}`))
+      .filter(channel => performs(plays, personId, channel.id, bundle.channelPeople) && !have.has(`${personId}|${channel.id}`))
       .map(channel => ({ ...copyFor(bundle.shoot.id, group, personId, channel.id), script_snapshot: vo.beats })))
   if (rows.length) check(await db.from('shoot_items').insert(rows))
   return []
