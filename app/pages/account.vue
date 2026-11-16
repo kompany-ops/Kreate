@@ -106,7 +106,7 @@ function glance(org: MyOrg) {
   }
 }
 
-const klipLabel = { purchased: 'Klip', exempt: 'Klip', included: 'Klip', trial: 'Klip (trial)', none: '' } as const
+const klipLabel = { purchased: 'Klip', exempt: 'Klip', included: 'Klip', seat: 'Klip', trial: 'Klip (trial)', none: '' } as const
 
 // --- profile ---------------------------------------------------------------
 const form = reactive({ name: '' })

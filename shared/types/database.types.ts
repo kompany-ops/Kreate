@@ -1158,6 +1158,7 @@ export type Database = {
           org_id: string
           plan: string | null
           price_id: string | null
+          seats: number
           status: string | null
           stripe_customer_id: string
           stripe_subscription_id: string | null
@@ -1174,6 +1175,7 @@ export type Database = {
           org_id: string
           plan?: string | null
           price_id?: string | null
+          seats?: number
           status?: string | null
           stripe_customer_id: string
           stripe_subscription_id?: string | null
@@ -1190,6 +1192,7 @@ export type Database = {
           org_id?: string
           plan?: string | null
           price_id?: string | null
+          seats?: number
           status?: string | null
           stripe_customer_id?: string
           stripe_subscription_id?: string | null
@@ -1607,6 +1610,70 @@ export type Database = {
           {
             foreignKeyName: "profiles_active_org_id_fkey"
             columns: ["active_org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      seats: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          created_at: string
+          creator_name: string
+          creator_org_id: string
+          ended_at: string | null
+          id: string
+          publisher_name: string
+          publisher_org_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          created_at?: string
+          creator_name: string
+          creator_org_id: string
+          ended_at?: string | null
+          id?: string
+          publisher_name: string
+          publisher_org_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          created_at?: string
+          creator_name?: string
+          creator_org_id?: string
+          ended_at?: string | null
+          id?: string
+          publisher_name?: string
+          publisher_org_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seats_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "seats_creator_org_id_fkey"
+            columns: ["creator_org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "seats_publisher_org_id_fkey"
+            columns: ["publisher_org_id"]
             isOneToOne: false
             referencedRelation: "orgs"
             referencedColumns: ["id"]

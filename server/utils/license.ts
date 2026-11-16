@@ -11,8 +11,9 @@ import { serverSupabaseUser } from '#supabase/server'
 //
 // A token is `<payload>.<signature>`, both base64url; the payload is the JSON below.
 
-export type KlipAccess = 'purchased' | 'trial' | 'exempt' | 'none'
-const KLIP_ACCESS: KlipAccess[] = ['purchased', 'trial', 'exempt', 'none']
+/** how the org has Klip: bought, billing-exempt, included in Studio, a brand's seat, its trial, or not */
+export type KlipAccess = 'purchased' | 'trial' | 'exempt' | 'included' | 'seat' | 'none'
+const KLIP_ACCESS: KlipAccess[] = ['purchased', 'trial', 'exempt', 'included', 'seat', 'none']
 
 export interface License {
   v: 1

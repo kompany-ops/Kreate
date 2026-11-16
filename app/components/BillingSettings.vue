@@ -15,9 +15,15 @@ const { currentOrg, load } = useOrg()
 const { plan, loadPlan } = usePlan()
 
 const subscription = ref<Row<'org_subscriptions'> | null>(null)
+/** brands and agencies paying for this account's shoots for them (seats) */
+const coveredBy = ref<string[]>([])
 async function refresh() {
-  const { data } = await db.from('org_subscriptions').select('*').maybeSingle()
+  const [{ data }, { data: seats }] = await Promise.all([
+    db.from('org_subscriptions').select('*').maybeSingle(),
+    db.from('seats').select('publisher_name, status').eq('status', 'active')
+  ])
   subscription.value = data
+  coveredBy.value = (seats ?? []).map(seat => seat.publisher_name)
   await Promise.all([load(), loadPlan()])
 }
 await refresh()
@@ -157,6 +163,11 @@ async function setExtraTeam(extra: number) {
         You're on Free. Choose a plan when you need more: cast are always free, and you never lose anything by changing plan.
       </p>
 
+      <p v-if="coveredBy.length" class="text-sm text-muted">
+        <UIcon name="i-lucide-handshake" class="mr-1 align-middle" />
+        {{ coveredBy.join(', ') }} {{ coveredBy.length === 1 ? 'pays' : 'pay' }} for your shoots for {{ coveredBy.length === 1 ? 'it' : 'them' }}: those don't use up your shoots a month, and Klip comes with {{ coveredBy.length === 1 ? 'it' : 'them' }}.
+      </p>
+
       <!-- what's used of what the plan includes -->
       <div v-if="usage.length" class="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div v-for="row in usage" :key="row.label" class="rounded-lg border border-default p-3">
@@ -223,7 +234,7 @@ async function setExtraTeam(extra: number) {
           Klip
         </h2>
         <UBadge v-if="klipOwned" label="Owned" color="success" variant="subtle" />
-        <UBadge v-else-if="currentOrg?.klip_access === 'exempt' || currentOrg?.klip_access === 'included'" label="Included" color="success" variant="subtle" />
+        <UBadge v-else-if="currentOrg?.klip_access === 'exempt' || currentOrg?.klip_access === 'included' || currentOrg?.klip_access === 'seat'" label="Included" color="success" variant="subtle" />
         <UBadge v-else-if="currentOrg?.klip_access === 'trial'" label="In your trial" color="info" variant="subtle" />
         <UBadge v-else label="Not bought" color="neutral" variant="subtle" />
       </div>
@@ -243,6 +254,9 @@ async function setExtraTeam(extra: number) {
         <template v-else-if="currentOrg?.klip_access === 'included'">
           Studio includes it.
         </template>
+        <template v-else-if="currentOrg?.klip_access === 'seat'">
+          {{ coveredBy.join(', ') || 'A brand you partner with' }} {{ coveredBy.length > 1 ? 'include' : 'includes' }} it while {{ coveredBy.length > 1 ? 'they pay' : 'it pays' }} for your shoots.
+        </template>
         <template v-else-if="currentOrg?.klip_access === 'trial'">
           Your free trial includes it until {{ date(subscription?.trial_end) ?? 'the trial ends' }}. To keep it after that, buy it once for $189.99.
         </template>
@@ -251,7 +265,7 @@ async function setExtraTeam(extra: number) {
         </template>
       </p>
 
-      <div v-if="isOwner && !waitingKlip && !klipOwned && !['exempt', 'included'].includes(currentOrg?.klip_access ?? '')">
+      <div v-if="isOwner && !waitingKlip && !klipOwned && !['exempt', 'included', 'seat'].includes(currentOrg?.klip_access ?? '')">
         <UButton label="Buy Klip" icon="i-lucide-scissors" :loading="going" @click="go('/api/billing/klip-checkout')" />
       </div>
 

@@ -8,8 +8,8 @@ export interface MyOrg {
   has_chosen: boolean
   /** always true now that Free is a plan (kept for the license and the AI connector) */
   entitled: boolean
-  /** how it has Klip: bought, billing-exempt, included in Studio, for the length of its trial, or not at all */
-  klip_access: 'purchased' | 'exempt' | 'included' | 'trial' | 'none'
+  /** how it has Klip: bought, billing-exempt, included in Studio, a brand's seat, for the length of its trial, or not at all */
+  klip_access: 'purchased' | 'exempt' | 'included' | 'seat' | 'trial' | 'none'
   /** its photo, set by its team (Settings → Profile) */
   logo_url: string | null
   /** creator (shoots), brand (one brand: its profile and library) or agency */

@@ -40,6 +40,8 @@ export async function syncSubscription(event: H3Event, subscriptionId: string) {
   const items = subscription.items.data
   const item = items.find(i => planForLookupKey(i.price.lookup_key)) ?? items[0]
   const teamItem = items.find(i => i.price.lookup_key === TEAM_MEMBER.lookupKey)
+  // a brand's or agency's seats: the seat price's quantity
+  const seatItem = items.find(i => SEAT_LOOKUP_KEYS.includes(i.price.lookup_key ?? ''))
   const seconds = (value: number | null | undefined) => value ? new Date(value * 1000).toISOString() : null
   const { error } = await db.from('org_subscriptions').upsert({
     org_id: orgId,
@@ -49,6 +51,7 @@ export async function syncSubscription(event: H3Event, subscriptionId: string) {
     price_id: item?.price.id ?? null,
     plan: planForLookupKey(item?.price.lookup_key),
     extra_team: teamItem?.quantity ?? 0,
+    seats: seatItem?.quantity ?? 0,
     current_period_end: seconds(item?.current_period_end),
     trial_end: seconds(subscription.trial_end),
     cancel_at_period_end: subscription.cancel_at_period_end,
@@ -56,6 +59,20 @@ export async function syncSubscription(event: H3Event, subscriptionId: string) {
     synced_at: new Date().toISOString()
   }, { onConflict: 'org_id' })
   if (error) throw error
+  // seats waiting for a live subscription start now (up to what's paid for)
+  if (seatItem && isEntitled(subscription.status)) await activatePendingSeats(event, orgId, seatItem.quantity ?? 0)
+}
+
+/** Switch on a payer's pending seats, oldest first, as far as the seats paid for go. */
+export async function activatePendingSeats(event: H3Event, orgId: string, paid: number) {
+  const db = serviceDb(event)
+  const { data: current } = await db.from('seats').select('id, status').eq('publisher_org_id', orgId).neq('status', 'ended').order('assigned_at')
+  const active = (current ?? []).filter(seat => seat.status === 'active').length
+  const toStart = (current ?? []).filter(seat => seat.status === 'pending').slice(0, Math.max(0, paid - active)).map(seat => seat.id)
+  if (toStart.length) {
+    const { error } = await db.from('seats').update({ status: 'active' }).in('id', toStart)
+    if (error) throw error
+  }
 }
 
 /** The org's Stripe customer, made the first time it's needed (one per org, reused for everything). */

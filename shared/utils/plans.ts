@@ -85,6 +85,39 @@ export const PAID_PLANS: PaidPlanId[] = ['starter', 'pro', 'studio']
 /** An extra team place on a paid plan. */
 export const TEAM_MEMBER = { price: 29.99, lookupKey: 'kreate_team_member' } as const
 
+/**
+ * Seats (restructure Phase 5): a brand or agency pays per partnered creator, on one graduated
+ * price. Each step's discount applies to the seats above it, so a larger roster never costs less
+ * in total than a smaller one.
+ */
+export type SeatKind = 'brand' | 'agency'
+export const SEATS: Record<SeatKind, { price: number, lookupKey: string }> = {
+  brand: { price: 44.99, lookupKey: 'kreate_brand_seat' },
+  agency: { price: 74.99, lookupKey: 'kreate_agency_seat' }
+}
+/** The steps, as in Stripe: seats up to `upTo` (null: the rest) at `off` the full price. */
+export const SEAT_STEPS: { upTo: number | null, off: number }[] = [
+  { upTo: 9, off: 0 }, { upTo: 24, off: 0.15 }, { upTo: 49, off: 0.25 }, { upTo: null, off: 0.35 }
+]
+export const SEAT_LOOKUP_KEYS = Object.values(SEATS).map(seat => seat.lookupKey)
+
+/** One seat's price at a step, in cents, rounded down as in Stripe. */
+export const seatUnitCents = (kind: SeatKind, off: number) => Math.floor(Math.round(SEATS[kind].price * 100) * (1 - off))
+
+/** What `count` seats cost a month, in dollars: each seat at the price of its step. */
+export function seatsTotal(kind: SeatKind, count: number): number {
+  let cents = 0
+  let from = 0
+  for (const step of SEAT_STEPS) {
+    const upTo = step.upTo ?? Infinity
+    const inStep = Math.max(0, Math.min(count, upTo) - from)
+    cents += inStep * seatUnitCents(kind, step.off)
+    from = upTo
+    if (count <= upTo) break
+  }
+  return cents / 100
+}
+
 /** Prices from before plans: subscriptions on them are on this plan. */
 export const LEGACY_LOOKUP_KEYS: Record<string, PaidPlanId> = { top_dog_kit_monthly: 'pro' }
 
