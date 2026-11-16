@@ -2,10 +2,11 @@
 const route = useRoute()
 const router = useRouter()
 const { load } = useRefData()
+const { isPublisher } = useAccess()
 await load()
 
 // `help` is shown from the question mark beside each tab.
-const tabs = [
+const allTabs = [
   {
     label: 'Hooks',
     value: 'hooks',
@@ -31,6 +32,8 @@ const tabs = [
     help: 'Ways a finished video is presented: face to camera or over b-roll, a search bar, a text thread, greenscreen… Every one switched on is applied to every recipe that has what it needs, as an extra version.'
   }
 ]
+// treatments are how a creator's videos are cut: a brand account doesn't have them
+const tabs = isPublisher.value ? allTabs.filter(t => t.value !== 'treatments') : allTabs
 
 // Hooks has two views: the hook scripts, and the types they're tagged with
 const hookViews = [

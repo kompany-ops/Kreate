@@ -5,6 +5,8 @@ const route = useRoute()
 const db = useDb()
 const run = useAction()
 const { channels, features, load } = useRefData()
+// a brand account's own brand: its profile and products, without a creator's deal
+const { isPublisher } = useAccess()
 const brandId = route.params.id as string
 
 const brand = ref<Row<'brands'> | null>(null)
@@ -38,6 +40,35 @@ const form = reactive({
 const deal = ref(toBrandDeal(brand.value))
 const saving = ref(false)
 
+// --- the brand's public profile: what partner creators see -----------------------------------
+const profileForm = reactive({
+  about: brand.value.about ?? '',
+  website_url: brand.value.website_url ?? '',
+  logo_url: brand.value.logo_url ?? '',
+  guidelines: brand.value.guidelines ?? '',
+  library_rule: brand.value.library_rule
+})
+const LIBRARY_RULES = [
+  { label: 'Mix: our Library and the creator\'s', value: 'mix' },
+  { label: 'Ours only: shoots use only our Library', value: 'brand_only' }
+]
+const savingProfile = ref(false)
+async function saveProfile() {
+  savingProfile.value = true
+  await run(async () => {
+    must(await db.from('brands').update({
+      ...(isPublisher.value ? { name: form.name.trim() } : {}),
+      about: profileForm.about.trim() || null,
+      website_url: profileForm.website_url.trim() || null,
+      logo_url: profileForm.logo_url.trim() || null,
+      guidelines: profileForm.guidelines.trim() || null,
+      library_rule: profileForm.library_rule
+    }).eq('id', brandId))
+    await loadBrand()
+  }, 'Profile saved')
+  savingProfile.value = false
+}
+
 async function saveBrand() {
   saving.value = true
   await run(async () => {
@@ -48,7 +79,7 @@ async function saveBrand() {
       ...fromBrandDeal(deal.value)
     }).eq('id', brandId))
     await loadBrand()
-  }, 'Brand saved')
+  }, 'Deal saved')
   saving.value = false
 }
 
@@ -189,15 +220,16 @@ async function saveProduct() {
   <UDashboardPanel v-if="brand" id="brand">
     <template #header>
       <UDashboardNavbar :title="brand.name">
-        <template #leading>
+        <template v-if="!isPublisher" #leading>
           <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" to="/brands" aria-label="Back to brands" />
         </template>
-        <template #trailing>
+        <template v-if="!isPublisher" #trailing>
           <BrandStar :starred="brand.starred" :name="brand.name" size="sm" @toggle="toggleStar" />
           <UBadge v-if="brand.archived_at" label="Archived" color="neutral" variant="outline" />
           <UBadge v-else :label="brand.status" :color="BRAND_STATUS_COLORS[brand.status]" variant="subtle" class="capitalize" />
         </template>
         <template #right>
+          <template v-if="!isPublisher">
           <UButton
             v-if="brand.archived_at"
             icon="i-lucide-archive-restore"
@@ -217,6 +249,7 @@ async function saveProduct() {
             aria-label="Archive brand"
             @click="setArchived(true)"
           />
+          </template>
           <ShareToChat :share="{ type: 'brand', id: brand.id, title: brand.name, preview: brand.notes || undefined, path: `/brands/${brand.id}` }" />
         </template>
       </UDashboardNavbar>
@@ -233,10 +266,50 @@ async function saveProduct() {
         class="mx-auto mb-6 w-full max-w-5xl"
       />
       <div class="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-2">
+        <div class="space-y-6">
         <UCard>
           <template #header>
             <h2 class="font-semibold text-highlighted">
-              Brand
+              Profile
+            </h2>
+            <p class="text-sm text-muted">
+              {{ isPublisher ? 'What creators you partner with see about you.' : 'What the brand is about, and how its shoots use the Library.' }}
+            </p>
+          </template>
+          <div class="space-y-4">
+            <UFormField v-if="isPublisher" label="Name">
+              <UInput v-model="form.name" class="w-full" />
+            </UFormField>
+            <UFormField label="About">
+              <UTextarea v-model="profileForm.about" autoresize class="w-full" placeholder="What the brand makes, and who for" />
+            </UFormField>
+            <UFormField label="Website">
+              <UInput v-model="profileForm.website_url" type="url" class="w-full" placeholder="https://" />
+            </UFormField>
+            <UFormField label="Logo" help="A link to the logo image">
+              <UInput v-model="profileForm.logo_url" type="url" class="w-full" placeholder="https://" />
+            </UFormField>
+            <UFormField label="Guidelines" help="Dos and don'ts for creators making its ads">
+              <UTextarea v-model="profileForm.guidelines" autoresize class="w-full" />
+            </UFormField>
+            <UFormField label="Library" help="Which hooks, CTAs and formats its shoots can use">
+              <USelect v-model="profileForm.library_rule" :items="LIBRARY_RULES" class="w-full" />
+            </UFormField>
+          </div>
+          <template #footer>
+            <UButton
+              label="Save profile"
+              :loading="savingProfile"
+              :disabled="(isPublisher && !form.name.trim()) || !isValidUrl(profileForm.website_url) || !isValidUrl(profileForm.logo_url)"
+              @click="saveProfile"
+            />
+          </template>
+        </UCard>
+
+        <UCard v-if="!isPublisher">
+          <template #header>
+            <h2 class="font-semibold text-highlighted">
+              Your deal
             </h2>
           </template>
           <div class="space-y-4">
@@ -258,14 +331,15 @@ async function saveProduct() {
             <CreatedBy :by="brand.created_by" :at="brand.created_at" />
           </div>
           <template #footer>
-            <UButton label="Save brand" :loading="saving" :disabled="!form.name.trim() || !isValidUrl(deal.trybe_url)" @click="saveBrand" />
+            <UButton label="Save deal" :loading="saving" :disabled="!form.name.trim() || !isValidUrl(deal.trybe_url)" @click="saveBrand" />
           </template>
         </UCard>
+        </div>
 
         <div class="space-y-6">
-          <BrandTrybeData :data="brand.trybe_data" :brand-id="brand.trybe_brand_id" :trybe-url="brand.trybe_url" />
+          <BrandTrybeData v-if="!isPublisher" :data="brand.trybe_data" :brand-id="brand.trybe_brand_id" :trybe-url="brand.trybe_url" />
 
-          <UCard>
+          <UCard v-if="!isPublisher">
             <template #header>
               <h2 class="font-semibold text-highlighted">
                 Channels

@@ -206,17 +206,18 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
         .select('id, code, name, kind, description, beats, beat_descriptions, beat_examples, beat_display, cta_modes, target_seconds')
         .eq('archived', false).order('code').limit(max)) ?? []).map(row => ({ ...row, link: link(paths.format(row.id)) })))
     }
-    // a product's own, plus the general ones; or everything when no product is given
-    const forProduct = product_id ? `product_id.is.null,product_id.eq.${product_id}` : null
+    // a product's own, its brand's and the general ones; or everything when no product is given
+    const brandId = product_id ? (must(await db.from('products').select('brand_id').eq('id', product_id).maybeSingle()))?.brand_id : null
+    const forProduct = product_id ? libraryFilterFor(product_id, brandId) : null
     if (kind === 'hooks') {
       let hooks = db.from('hook_templates')
-        .select('id, script, caption, tags, product_id, hook_type:angles(name)')
+        .select('id, script, caption, tags, product_id, brand_id, hook_type:angles(name)')
         .is('shoot_id', null).eq('archived', false)
       if (forProduct) hooks = hooks.or(forProduct)
       return text((must(await hooks.order('created_at', { ascending: false }).limit(max)) ?? []).map(row => ({ ...row, link: link(paths.hook(row.id)) })))
     }
     let ctas = db.from('cta_templates')
-      .select('id, script, mode, tags, product_id')
+      .select('id, script, mode, tags, product_id, brand_id')
       .is('shoot_id', null).eq('archived', false)
     if (forProduct) ctas = ctas.or(forProduct)
     return text((must(await ctas.order('created_at', { ascending: false }).limit(max)) ?? []).map(row => ({ ...row, link: link(paths.cta(row.id)) })))

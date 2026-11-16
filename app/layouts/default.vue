@@ -3,7 +3,7 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 
 // An organisation's pages: the top bar (Kreate, the organisation, your photo) across the top, and
 // below it the organisation's sidebar and the page.
-const { isAdmin, isCast } = useAccess()
+const { isAdmin, isCast, isPublisher } = useAccess()
 const route = useRoute()
 
 // the organisation's chat: one live subscription for the whole app, and the unread count on its button
@@ -22,7 +22,13 @@ onBeforeUnmount(() => {
   if (chatChannel) useSupabaseClient().removeChannel(chatChannel)
 })
 
-const items = computed<NavigationMenuItem[]>(() => [
+const items = computed<NavigationMenuItem[]>(() => isPublisher.value ? [
+  // a brand account: its brand (profile and products), its Library, chat and settings
+  { label: 'Brand', icon: 'i-lucide-store', to: '/brand', active: route.path === '/brand' || route.path.startsWith('/brands/') },
+  { label: 'Library', icon: 'i-lucide-library', to: '/library' },
+  { label: 'Chat', icon: 'i-lucide-messages-square', to: '/chat', ...(chat.unread.value ? { badge: { label: chat.unread.value > 99 ? '99+' : String(chat.unread.value), color: 'primary' as const, variant: 'solid' as const } } : {}) },
+  ...(isAdmin.value ? [{ label: 'Settings', icon: 'i-lucide-settings', to: '/settings' }] : [])
+] : [
   { label: 'Chat', icon: 'i-lucide-messages-square', to: '/chat', ...(chat.unread.value ? { badge: { label: chat.unread.value > 99 ? '99+' : String(chat.unread.value), color: 'primary' as const, variant: 'solid' as const } } : {}) },
   // cast see the shoots they're in, and chat; the Library and Brands are the team's
   ...(isCast.value ? [] : [{ label: 'Library', icon: 'i-lucide-library', to: '/library' }]),

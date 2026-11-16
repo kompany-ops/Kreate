@@ -314,6 +314,7 @@ export type Database = {
       }
       brands: {
         Row: {
+          about: string | null
           ad_spend_pct: number | null
           archived_at: string | null
           commission_pct: number | null
@@ -321,7 +322,10 @@ export type Database = {
           created_by: string | null
           currency: string
           flat_fee: number | null
+          guidelines: string | null
           id: string
+          library_rule: string
+          logo_url: string | null
           name: string
           notes: string | null
           org_id: string
@@ -336,8 +340,10 @@ export type Database = {
           trybe_url: string | null
           updated_at: string
           videos_required: number | null
+          website_url: string | null
         }
         Insert: {
+          about?: string | null
           ad_spend_pct?: number | null
           archived_at?: string | null
           commission_pct?: number | null
@@ -345,7 +351,10 @@ export type Database = {
           created_by?: string | null
           currency?: string
           flat_fee?: number | null
+          guidelines?: string | null
           id?: string
+          library_rule?: string
+          logo_url?: string | null
           name: string
           notes?: string | null
           org_id?: string
@@ -360,8 +369,10 @@ export type Database = {
           trybe_url?: string | null
           updated_at?: string
           videos_required?: number | null
+          website_url?: string | null
         }
         Update: {
+          about?: string | null
           ad_spend_pct?: number | null
           archived_at?: string | null
           commission_pct?: number | null
@@ -369,7 +380,10 @@ export type Database = {
           created_by?: string | null
           currency?: string
           flat_fee?: number | null
+          guidelines?: string | null
           id?: string
+          library_rule?: string
+          logo_url?: string | null
           name?: string
           notes?: string | null
           org_id?: string
@@ -384,6 +398,7 @@ export type Database = {
           trybe_url?: string | null
           updated_at?: string
           videos_required?: number | null
+          website_url?: string | null
         }
         Relationships: [
           {
@@ -574,6 +589,7 @@ export type Database = {
       cta_templates: {
         Row: {
           archived: boolean
+          brand_id: string | null
           created_at: string
           created_by: string | null
           est_seconds: number | null
@@ -590,6 +606,7 @@ export type Database = {
         }
         Insert: {
           archived?: boolean
+          brand_id?: string | null
           created_at?: string
           created_by?: string | null
           est_seconds?: number | null
@@ -606,6 +623,7 @@ export type Database = {
         }
         Update: {
           archived?: boolean
+          brand_id?: string | null
           created_at?: string
           created_by?: string | null
           est_seconds?: number | null
@@ -621,6 +639,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "cta_templates_brand_id_fkey"
+            columns: ["org_id", "brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["org_id", "id"]
+          },
           {
             foreignKeyName: "cta_templates_org_id_fkey"
             columns: ["org_id"]
@@ -706,6 +731,7 @@ export type Database = {
           beat_display: Json
           beat_examples: Json
           beats: string[]
+          brand_id: string | null
           code: string
           created_at: string
           created_by: string | null
@@ -726,6 +752,7 @@ export type Database = {
           beat_display?: Json
           beat_examples?: Json
           beats?: string[]
+          brand_id?: string | null
           code: string
           created_at?: string
           created_by?: string | null
@@ -746,6 +773,7 @@ export type Database = {
           beat_display?: Json
           beat_examples?: Json
           beats?: string[]
+          brand_id?: string | null
           code?: string
           created_at?: string
           created_by?: string | null
@@ -761,6 +789,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "formats_brand_id_fkey"
+            columns: ["org_id", "brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
             foreignKeyName: "formats_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
@@ -773,6 +808,7 @@ export type Database = {
         Row: {
           angle_id: string | null
           archived: boolean
+          brand_id: string | null
           caption: string | null
           created_at: string
           created_by: string | null
@@ -791,6 +827,7 @@ export type Database = {
         Insert: {
           angle_id?: string | null
           archived?: boolean
+          brand_id?: string | null
           caption?: string | null
           created_at?: string
           created_by?: string | null
@@ -809,6 +846,7 @@ export type Database = {
         Update: {
           angle_id?: string | null
           archived?: boolean
+          brand_id?: string | null
           caption?: string | null
           created_at?: string
           created_by?: string | null
@@ -830,6 +868,13 @@ export type Database = {
             columns: ["org_id", "angle_id"]
             isOneToOne: false
             referencedRelation: "angles"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
+            foreignKeyName: "hook_templates_brand_id_fkey"
+            columns: ["org_id", "brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
             referencedColumns: ["org_id", "id"]
           },
           {
@@ -1157,6 +1202,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           id: string
+          kind: string
           klip_payment_intent_id: string | null
           klip_purchased_at: string | null
           klip_signed_out_at: string | null
@@ -1171,6 +1217,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          kind?: string
           klip_payment_intent_id?: string | null
           klip_purchased_at?: string | null
           klip_signed_out_at?: string | null
@@ -1185,6 +1232,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
+          kind?: string
           klip_payment_intent_id?: string | null
           klip_purchased_at?: string | null
           klip_signed_out_at?: string | null
@@ -2370,7 +2418,12 @@ export type Database = {
     Functions: {
       chat_unread_count: { Args: never; Returns: number }
       create_org: {
-        Args: { p_name: string; p_profile?: Json; p_slug: string }
+        Args: {
+          p_kind?: string
+          p_name: string
+          p_profile?: Json
+          p_slug: string
+        }
         Returns: string
       }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
@@ -2409,6 +2462,7 @@ export type Database = {
           has_chosen: boolean
           id: string
           is_current: boolean
+          kind: string
           klip_access: string
           logo_url: string
           name: string

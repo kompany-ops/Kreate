@@ -6,13 +6,13 @@ const db = useDb()
 const run = useAction()
 const { confirmDialog } = useConfirm()
 const { people, channels, settings, load } = useRefData()
-const { access, isOwner } = useAccess()
+const { access, isOwner, isPublisher } = useAccess()
 const { plan, teamFull, loadPlan, buyTeamPlace } = usePlan()
 const { currentOrg, load: loadOrgs } = useOrg()
 
 // The organisation's settings, for its team. Your own name, email, password and AI apps are in
 // Your account (/account).
-const tabs = [
+const allTabs = [
   { label: 'Profile', value: 'profile', icon: 'i-lucide-building-2' },
   { label: 'Channels', value: 'channels', icon: 'i-lucide-tv' },
   { label: 'Scripts', value: 'scripts', icon: 'i-lucide-pen-line' },
@@ -21,6 +21,8 @@ const tabs = [
   { label: 'Dropbox', value: 'dropbox', icon: 'i-simple-icons-dropbox' }
 ]
 const route = useRoute()
+// a brand account doesn't shoot: no channels, filming defaults or Dropbox
+const tabs = isPublisher.value ? allTabs.filter(t => !['channels', 'defaults', 'dropbox'].includes(t.value)) : allTabs
 const tabFrom = (value: unknown) => tabs.some(t => t.value === value) ? String(value) : tabs[0]!.value
 const tab = ref(tabFrom(route.query.tab))
 // links come in with ?tab=…, also while Settings is already open
@@ -475,7 +477,7 @@ async function saveDefaults() {
             </template>
           </UCard>
 
-          <BillingSettings />
+          <BillingSettings v-if="!isPublisher" />
         </template>
 
         <!-- Channels -->

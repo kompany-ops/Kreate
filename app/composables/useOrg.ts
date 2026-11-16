@@ -12,6 +12,8 @@ export interface MyOrg {
   klip_access: 'purchased' | 'exempt' | 'included' | 'trial' | 'none'
   /** its photo, set by its team (Settings → Profile) */
   logo_url: string | null
+  /** creator (shoots), brand (one brand: its profile and library) or agency */
+  kind: 'creator' | 'brand' | 'agency'
 }
 
 /**
@@ -46,12 +48,12 @@ export const useOrg = () => {
     await enter()
   }
 
-  /** Start an org; its profile (who it is and how its scripts sound) is saved with it. */
-  async function createOrg(name: string, slug: string, profile?: OrgProfile) {
-    const { error } = await db.rpc('create_org', { p_name: name, p_slug: slug, p_profile: profile ? { ...profile } : {} })
+  /** Start an account of a kind; its profile (who it is and how its scripts sound) is saved with it. */
+  async function createOrg(name: string, slug: string, profile?: OrgProfile, kind: 'creator' | 'brand' = 'creator') {
+    const { error } = await db.rpc('create_org', { p_name: name, p_slug: slug, p_profile: profile ? { ...profile } : {}, p_kind: kind })
     if (error) throw error
-    // a new org starts on Free
-    await enter('/library')
+    // a creator starts on Free in the Library; a brand on its Brand page
+    await enter(kind === 'brand' ? '/brand' : '/library')
   }
 
   /** whether someone can start a new org (open: everyone starts on Free) */

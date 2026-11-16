@@ -56,19 +56,20 @@ watch(open, async (isOpen) => {
   search.value = ''
   loading.value = true
   await run(async () => {
-    // general hooks and this product's own; hooks written in other shoots stay with them
+    // general items, this brand's and this product's own; items written in other shoots stay with them
+    const brandId = productOf(props.productId)?.brand_id
+    const forThisShoot = libraryFilterFor(props.productId, brandId)
     if (props.kinds.includes('hook')) {
       hooks.value = must(await db.from('hook_templates').select('*').eq('archived', false).is('shoot_id', null)
-        .or(`product_id.is.null,product_id.eq.${props.productId}`).order('created_at', { ascending: false }))
+        .or(forThisShoot).order('created_at', { ascending: false }))
     }
     if (props.kinds.includes('body')) {
       allBodies.value = must(await db.from('body_templates').select('*, feature:product_features(name)')
         .eq('archived', false).eq('product_id', props.productId).order('created_at'))
     }
     if (props.kinds.includes('cta')) {
-      // general CTAs and this product's own; CTAs written in other shoots stay with them
       ctas.value = must(await db.from('cta_templates').select('*').eq('archived', false).is('shoot_id', null)
-        .or(`product_id.is.null,product_id.eq.${props.productId}`).order('created_at', { ascending: false }))
+        .or(forThisShoot).order('created_at', { ascending: false }))
     }
   })
   loading.value = false

@@ -7,7 +7,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const user = useSupabaseUser()
   if (!user.value) return
 
-  const { ensure, isAdmin, isCast, reset } = useAccess()
+  const { ensure, isAdmin, isCast, isPublisher, reset } = useAccess()
   const { needsPicker, signupOpen } = useOrg()
   if (!(await ensure(user.value))) {
     if (await signupOpen()) return to.path === '/onboarding' ? undefined : navigateTo('/onboarding')
@@ -22,6 +22,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // Your account is theirs, whatever the organisation's state; it's also where they pick one
   if (to.path === '/account') return
   if (needsPicker.value) return navigateTo('/account')
+  // a brand account never shoots, and has one brand: its Brand page
+  if (isPublisher.value && (to.path === '/' || to.path.startsWith('/shoots') || to.path === '/brands')) return navigateTo('/brand')
   // the Library and Brands are the team's: cast land on their shoots
   if (isCast.value && (to.path === '/' || to.path.startsWith('/library') || to.path.startsWith('/brands'))) return navigateTo('/shoots')
   // Settings is the organisation's, for the team; everyone's own things are in Your account

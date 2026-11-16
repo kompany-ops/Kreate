@@ -4,6 +4,8 @@ interface Access {
   email: string
   role: string
   display_name: string | null
+  /** what kind of account the current one is */
+  kind: 'creator' | 'brand' | 'agency'
 }
 
 /**
@@ -22,7 +24,7 @@ export const useAccess = () => {
     try {
       const current = (await load()).find(org => org.is_current)
       access.value = current
-        ? { id: user.sub, email: user.email ?? '', role: current.role, display_name: current.display_name }
+        ? { id: user.sub, email: user.email ?? '', role: current.role, display_name: current.display_name, kind: current.kind ?? 'creator' }
         : null
       checkedFor.value = user.sub
       return !!current
@@ -40,6 +42,8 @@ export const useAccess = () => {
   const isAdmin = computed(() => isTeamRole(access.value?.role))
   const isOwner = computed(() => access.value?.role === 'owner')
   const isCast = computed(() => !!access.value && !isTeamRole(access.value.role))
+  /** a brand or agency account: it publishes brands and never shoots */
+  const isPublisher = computed(() => !!access.value && access.value.kind !== 'creator')
 
-  return { access, isAdmin, isOwner, isCast, ensure, reset }
+  return { access, isAdmin, isOwner, isCast, isPublisher, ensure, reset }
 }

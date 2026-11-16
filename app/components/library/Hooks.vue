@@ -3,7 +3,7 @@ import type { Row } from '#shared/types/models'
 
 const db = useDb()
 const run = useAction()
-const { hookTypeName, hookTypeOptions, productOptions, productOf } = useRefData()
+const { hookTypeName, hookTypeOptions, productOptions, productOf, scopeOptions, brandOf } = useRefData()
 const { context } = usePreviewContext()
 const library = useLibrary('hook_templates', { usageKind: 'hook', text: row => row.script })
 
@@ -19,7 +19,7 @@ const visible = computed(() => library.visible(row =>
   !row.shoot_id
   && (hookType.value === 'all' || row.angle_id === hookType.value)
   && (tag.value === 'all' || row.tags.includes(tag.value))
-  && (product.value === 'all' || (product.value === 'general' ? !row.product_id : row.product_id === product.value))
+  && (product.value === 'all' || (product.value === 'general' ? !row.product_id && !row.brand_id : row.product_id === product.value))
 ))
 const pageRows = computed(() => library.paginate(visible.value))
 watch([hookType, tag, product], library.resetPage)
@@ -37,8 +37,8 @@ const form = reactive({
   source_url: '',
   filming_notes: '',
   caption: '',
-  /** kept for one product (offered only on its shoots); none = general */
-  product_id: undefined as string | undefined
+  /** what it's for (libraryScope): one product, one brand, or none = general */
+  scope: undefined as string | undefined
 })
 const requestOpen = useGuardedClose(open, form)
 
@@ -60,7 +60,7 @@ function edit(row?: Partial<Row<'hook_templates'>>, duplicate = false) {
     source_url: row?.source_url ?? '',
     filming_notes: row?.filming_notes ?? '',
     caption: row?.caption ?? '',
-    product_id: row?.product_id ?? undefined
+    scope: scopeOf(row)
   })
   open.value = true
 }
@@ -79,7 +79,7 @@ async function save() {
       source_url: normalizeUrl(form.source_url),
       filming_notes: form.filming_notes.trim() || null,
       caption: form.caption.trim() || null,
-      product_id: form.product_id ?? null
+      ...scopeFields(form.scope)
     }
     if (form.id) must(await db.from('hook_templates').update(fields).eq('id', form.id))
     else must(await db.from('hook_templates').insert(fields))
@@ -122,6 +122,7 @@ async function save() {
           </p>
           <div class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
             <UBadge v-if="row.product_id" :label="`${productOf(row.product_id)?.name ?? 'One product'} only`" icon="i-lucide-package" color="primary" variant="subtle" size="sm" />
+            <UBadge v-else-if="row.brand_id" :label="`${brandOf(row.brand_id)?.name ?? 'One brand'} only`" icon="i-lucide-store" color="primary" variant="subtle" size="sm" />
             <UTooltip v-if="row.filming_notes" :text="row.filming_notes">
               <UBadge label="Filming notes" icon="i-lucide-video" color="neutral" variant="subtle" size="sm" />
             </UTooltip>
@@ -169,8 +170,8 @@ async function save() {
             <UTextarea v-model="form.filming_notes" autoresize :rows="2" class="w-full" />
           </UFormField>
 
-          <UFormField label="Product" help="Keep this hook for one product: it's offered only on that product's shoots. Leave empty for a general hook offered on every shoot.">
-            <USelectMenu v-model="form.product_id" :items="productOptions" value-key="value" placeholder="General: every product" class="w-full" />
+          <UFormField label="For" help="Keep this hook for one brand or one product: it's offered only on their shoots. Leave empty for a general hook offered on every shoot.">
+            <USelectMenu v-model="form.scope" :items="scopeOptions" value-key="value" placeholder="General: every brand" class="w-full" />
           </UFormField>
 
           <div class="grid gap-4 sm:grid-cols-2">

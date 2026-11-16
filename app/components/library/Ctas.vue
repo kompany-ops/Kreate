@@ -4,7 +4,7 @@ import type { Row } from '#shared/types/models'
 const db = useDb()
 const run = useAction()
 const { context } = usePreviewContext()
-const { productOptions, productOf } = useRefData()
+const { productOptions, productOf, scopeOptions, brandOf } = useRefData()
 const library = useLibrary('cta_templates', { usageKind: 'cta', text: row => row.script })
 
 const mode = ref('all')
@@ -20,7 +20,7 @@ const visible = computed(() => library.visible(row =>
   !row.shoot_id
   && (mode.value === 'all' || row.mode === mode.value)
   && (tag.value === 'all' || row.tags.includes(tag.value))
-  && (product.value === 'all' || (product.value === 'general' ? !row.product_id : row.product_id === product.value))
+  && (product.value === 'all' || (product.value === 'general' ? !row.product_id && !row.brand_id : row.product_id === product.value))
 ))
 const pageRows = computed(() => library.paginate(visible.value))
 watch([mode, tag, product], library.resetPage)
@@ -35,8 +35,8 @@ const form = reactive({
   tags: [] as string[],
   notes: '',
   source_url: '',
-  /** kept for one product (offered only on its shoots); none = general */
-  product_id: undefined as string | undefined
+  /** what it's for (libraryScope): one product, one brand, or none = general */
+  scope: undefined as string | undefined
 })
 const requestOpen = useGuardedClose(open, form)
 
@@ -56,7 +56,7 @@ function edit(row?: Partial<Row<'cta_templates'>>, duplicate = false) {
     tags: [...(row?.tags ?? [])],
     notes: row?.notes ?? '',
     source_url: row?.source_url ?? '',
-    product_id: row?.product_id ?? undefined
+    scope: scopeOf(row)
   })
   open.value = true
 }
@@ -71,7 +71,7 @@ async function save() {
       tags: form.tags,
       notes: form.notes.trim() || null,
       source_url: normalizeUrl(form.source_url),
-      product_id: form.product_id ?? null
+      ...scopeFields(form.scope)
     }
     if (form.id) must(await db.from('cta_templates').update(fields).eq('id', form.id))
     else must(await db.from('cta_templates').insert(fields))
@@ -111,6 +111,7 @@ async function save() {
           <div class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
             <UBadge :label="row.mode === 'sync' ? 'Sync' : 'VO'" :color="row.mode === 'sync' ? 'info' : 'secondary'" variant="subtle" size="sm" />
             <UBadge v-if="row.product_id" :label="`${productOf(row.product_id)?.name ?? 'One product'} only`" icon="i-lucide-package" color="primary" variant="subtle" size="sm" />
+            <UBadge v-else-if="row.brand_id" :label="`${brandOf(row.brand_id)?.name ?? 'One brand'} only`" icon="i-lucide-store" color="primary" variant="subtle" size="sm" />
             <UBadge v-for="t in row.tags" :key="t" :label="t" color="neutral" variant="outline" size="sm" />
             <span v-if="row.est_seconds">{{ row.est_seconds }}s</span>
             <span>· {{ library.usedLabel(row.id) }}</span>
@@ -149,8 +150,8 @@ async function save() {
               <UInput v-model.number="form.est_seconds" type="number" min="0" class="w-full" />
             </UFormField>
           </div>
-          <UFormField label="Product" help="Keep this CTA for one product: it's offered only on that product's shoots. Leave empty for a general CTA offered on every shoot.">
-            <USelectMenu v-model="form.product_id" :items="productOptions" value-key="value" placeholder="General: every product" class="w-full" />
+          <UFormField label="For" help="Keep this CTA for one brand or one product: it's offered only on their shoots. Leave empty for a general CTA offered on every shoot.">
+            <USelectMenu v-model="form.scope" :items="scopeOptions" value-key="value" placeholder="General: every brand" class="w-full" />
           </UFormField>
           <UFormField label="Tags" help="Pick an existing tag or type a new one">
             <TagInput v-model="form.tags" />
