@@ -37,7 +37,17 @@ import type { BrollClip, Manifest, TakeClip } from './manifest'
 import type { BeatShow } from './shootsheet'
 import type { TakeBlocks, TakeRole, TakeText } from './klip'
 import { hasIngredient, isDrawable, treatmentIngredients } from './klip'
-import { slugify } from './slots'
+import { beatWordings, parseBeats, slugify } from './slots'
+
+/**
+ * The most wording mixes any VO on a shoot can make: every combination of its beats' wordings
+ * other than the first wordings. More than this adds nothing.
+ */
+export function wordingMixesAvailable(items: { kind: string, script_snapshot: unknown }[]): number {
+  return Math.max(0, ...items
+    .filter(item => item.kind === 'body')
+    .map(item => parseBeats(item.script_snapshot).reduce((product, beat) => product * Math.max(1, beatWordings(beat).length), 1) - 1))
+}
 
 /**
  * recipes.json's version.

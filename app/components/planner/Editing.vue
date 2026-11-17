@@ -47,6 +47,11 @@ async function connected() {
 // --- filmed → editing ----------------------------------------------------------------
 const starting = ref(false)
 async function startEditing() {
+  if (!(await confirmDialog({
+    title: `Send ${shoot.value.code} for editing?`,
+    description: 'Writes the manifest Klip works from (the plan and the treatments that are on) to the shoot\'s folder. Klip edits raw/ into edited/: each take\'s clip and captions, and whatever the treatments need.',
+    confirmLabel: 'Send for editing'
+  }))) return
   if (!(await connected())) return
   starting.value = true
   const version = (latest.value?.version ?? 0) + 1
@@ -147,19 +152,7 @@ async function goLive(override = false) {
       brollShots,
       overridden: result.value!.ok ? undefined : result.value!.problems
     })
-    const recipes = buildRecipes(manifest)
-    if (!recipes.length) throw new Error('These edits make no recipes: check the problems above')
-    await dropboxUploader.writeText(`${base.value}/manifest.json`, JSON.stringify(manifest, null, 2))
-    // every recipe, b-roll and all, fixed from here: batches reference them by id
-    await dropboxUploader.writeText(`${base.value}/recipes.json`, JSON.stringify({
-      schema_version: RECIPES_SCHEMA_VERSION,
-      shoot: shoot.value.code,
-      manifest_version: version,
-      generated_at: generatedAt,
-      // file paths are relative to the shoot's edited/ folder; a treated version uses the same takes,
-      // and the renderer composes the treatment from their blocks
-      recipes
-    }, null, 2))
+    await writeLiveFiles(base.value, shoot.value.code, manifest)
     must(await db.from('shoot_manifests').insert({ shoot_id: shoot.value.id, version, data: manifest as unknown as Json }))
     must(await db.from('shoots').update({ status: 'edited' }).eq('id', shoot.value.id).eq('status', 'editing'))
   }, 'Live: the recipes are built')
@@ -171,49 +164,26 @@ async function goLive(override = false) {
 }
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+// the shoot page's top bar runs these: every status change lives there (next step) or in Actions (back)
+defineExpose({ startEditing, backToFilmed, check, goLive, starting, checking, saving, result })
 </script>
 
 <template>
-  <UCard :ui="{ body: 'space-y-3' }">
-    <div class="flex flex-wrap items-start gap-3">
-      <UIcon name="i-lucide-scissors" class="mt-0.5 size-6 shrink-0" :class="shoot.status === 'editing' ? 'text-warning' : 'text-muted'" />
+  <UCard v-if="shoot.status === 'editing'" :ui="{ body: 'space-y-3' }">
+    <div class="flex items-start gap-3">
+      <UIcon name="i-lucide-scissors" class="mt-0.5 size-6 shrink-0 text-warning" />
       <div class="min-w-0 flex-1">
-        <template v-if="shoot.status === 'filmed'">
-          <p class="font-medium text-highlighted">
-            Filmed? Send it for editing
-          </p>
-          <p class="text-sm text-muted">
-            Writes the manifest Klip works from: the plan and the treatments that are on.
-            Klip edits raw/ into edited/: each take's clip and captions, and whatever the treatments need.
-          </p>
-        </template>
-        <template v-else>
-          <p class="font-medium text-highlighted">
-            Editing
-          </p>
-          <p class="text-sm text-muted">
-            <template v-if="latest">
-              Klip's manifest v{{ latest.version }}, {{ when(latest.created_at) }}.
-            </template>
-            Once Klip's done, check its work: its index (edited/_klip.json) is for this plan, every take is edited with its clip and captions, and every raw clip is accounted for<template v-if="ingredients.length">, with what {{ ingredients.map(treatment => treatment.name).join(', ') }} need</template>.
-            Going Live builds every recipe from Klip's index.
-          </p>
-        </template>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <template v-if="shoot.status === 'filmed'">
-          <UButton label="Start editing" icon="i-lucide-scissors" size="sm" :loading="starting" @click="startEditing" />
-        </template>
-        <template v-else>
-          <UButton label="Back to filmed" color="neutral" variant="ghost" size="sm" @click="backToFilmed" />
-          <UButton
-            :label="checking ? 'Checking…' : 'Check edits'"
-            icon="i-lucide-scan-search"
-            size="sm"
-            :loading="checking"
-            @click="check"
-          />
-        </template>
+        <p class="font-medium text-highlighted">
+          Editing
+        </p>
+        <p class="text-sm text-muted">
+          <template v-if="latest">
+            Klip's manifest v{{ latest.version }}, {{ when(latest.created_at) }}.
+          </template>
+          Once Klip's done, use <span class="font-medium text-highlighted">Check edits</span> at the top: its index (edited/_klip.json) is for this plan, every take is edited with its clip and captions, and every raw clip is accounted for<template v-if="ingredients.length">, with what {{ ingredients.map(treatment => treatment.name).join(', ') }} need</template>.
+          Then <span class="font-medium text-highlighted">Go Live</span> builds every recipe from Klip's index.
+        </p>
       </div>
     </div>
 
@@ -243,13 +213,8 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
         variant="subtle"
         icon="i-lucide-circle-check"
         :title="`Everything checks out: ${result.editedClips} clips in edited/`"
-      >
-        <template #description>
-          <div class="mt-2">
-            <UButton label="Go Live" icon="i-lucide-radio" size="sm" :loading="saving" @click="goLive()" />
-          </div>
-        </template>
-      </UAlert>
+        description="Go Live (at the top) builds every recipe."
+      />
       <UAlert
         v-else
         color="error"
@@ -266,18 +231,9 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
               …and {{ result.problems.length - 20 }} more
             </li>
           </ul>
-          <div class="mt-3 flex flex-wrap items-center gap-2">
-            <UButton
-              label="Go Live anyway"
-              icon="i-lucide-triangle-alert"
-              color="error"
-              variant="subtle"
-              size="sm"
-              :loading="saving"
-              @click="goLive(true)"
-            />
-            <span class="text-xs text-muted">Leaves out whatever's missing; recipes that need it won't be made.</span>
-          </div>
+          <p class="mt-3 text-xs text-muted">
+            Go Live anyway (at the top) leaves out whatever's missing; recipes that need it won't be made.
+          </p>
         </template>
       </UAlert>
     </template>

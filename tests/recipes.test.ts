@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BrollClip, Manifest, TakeClip } from '../shared/utils/manifest'
 import type { Recipe } from '../shared/utils/recipes'
 import { elementId, elementRecords, elementState, pickBatch, recipeElements } from '../shared/utils/batchLoop'
-import { batchCsv, batchOrder, batchSize, beatMixes, buildRecipes, byChannel, chooseBatch, nextBatchCode, pickCombos, renderFolder } from '../shared/utils/recipes'
+import { batchCsv, batchOrder, batchSize, beatMixes, buildRecipes, byChannel, chooseBatch, nextBatchCode, pickCombos, renderFolder, wordingMixesAvailable } from '../shared/utils/recipes'
 
 /** every block and text Klip could make for a take, so any treatment has what it needs */
 const everything = (file: string) => ({
@@ -505,5 +505,23 @@ describe('the batch loop', () => {
     expect(first).toMatchObject({ exploit: 0, explore: 3 })
     const second = pickBatch(recipes, { size: 8, exclude: new Set(first.recipes.map(recipe => recipe.id)) })
     expect(second.recipes.some(recipe => first.recipes.includes(recipe))).toBe(false)
+  })
+})
+
+describe('wordingMixesAvailable', () => {
+  it('is every combination of a VO\'s wordings but the first, at most', () => {
+    const hooks4 = [
+      { beat: 'hook', script: 'a', alternates: [{ script: 'b' }, { script: 'c' }, { script: 'd' }] },
+      { beat: 'problem', script: 'p' },
+      { beat: 'cta', script: 'c' }
+    ]
+    const twoByTwo = [
+      { beat: 'hook', script: 'a', alternates: [{ script: 'b' }] },
+      { beat: 'cta', script: 'c', alternates: [{ script: 'd' }] }
+    ]
+    expect(wordingMixesAvailable([{ kind: 'body', script_snapshot: hooks4 }, { kind: 'body', script_snapshot: twoByTwo }])).toBe(3)
+    expect(wordingMixesAvailable([{ kind: 'body', script_snapshot: twoByTwo }])).toBe(3)
+    expect(wordingMixesAvailable([{ kind: 'body', script_snapshot: [{ beat: 'hook', script: 'a' }] }])).toBe(0)
+    expect(wordingMixesAvailable([{ kind: 'hook', script_snapshot: hooks4 }])).toBe(0)
   })
 })

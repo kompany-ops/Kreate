@@ -10,6 +10,8 @@ const props = defineProps<{
   size?: 'sm' | 'md'
   /** show icons only on phones */
   iconOnMobile?: boolean
+  /** the page offers Resume in its own menu (the shoot page's Actions) */
+  noResume?: boolean
 }>()
 const emit = defineEmits<{ changed: [] }>()
 
@@ -90,7 +92,7 @@ const compact = computed(() => props.iconOnMobile ? { ui: ICON_ON_MOBILE, class:
     @click="end"
   />
   <UButton
-    v-else-if="isAdmin && props.shoot.status === 'filmed' && props.remaining > 0"
+    v-else-if="isAdmin && !props.noResume && props.shoot.status === 'filmed' && props.remaining > 0"
     label="Resume shoot"
     aria-label="Resume shoot"
     v-bind="compact"

@@ -5,6 +5,8 @@ import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { BundleItem, ShotGroup } from '#shared/utils/shootsheet'
 import { brollChannelIds } from '#shared/utils/shootsheet'
 import type { Beat } from '#shared/utils/slots'
+import type { EditsCheck } from '#shared/utils/manifest'
+import { wordingMixesAvailable } from '#shared/utils/recipes'
 import type { PickedItems } from '~/components/planner/ItemPicker.vue'
 import type { BrollFormat } from '~/components/planner/Broll.vue'
 
@@ -32,6 +34,18 @@ const { isAdmin } = useAccess()
 /** Live (edited): the recipes are built, so the shoot's details lock and its batches take over */
 const live = computed(() => shoot.value.status === 'edited')
 const loop = useBatchLoop(bundle)
+// every status change runs from the top bar (the next step) or Actions (moving back)
+const controls = useTemplateRef<{ resume: () => Promise<void> }>('controls')
+const editing = useTemplateRef<{
+  startEditing: () => Promise<void>
+  backToFilmed: () => Promise<void>
+  check: () => Promise<void>
+  goLive: (override?: boolean) => Promise<void>
+  starting: boolean
+  checking: boolean
+  saving: boolean
+  result: EditsCheck | null
+}>('editing')
 const channelIds = computed(() => bundle.value.channels.map(channel => channel.id))
 const busy = ref(false)
 
@@ -92,6 +106,14 @@ async function patchShoot(patch: Update<'shoots'>) {
     must(await db.from('shoots').update(patch).eq('id', shoot.value.id))
     await refresh()
   })
+}
+
+// Wording mixes only shape the recipes, not what's filmed, so they can change until the first
+// batch (once Live, in the Batches tab), up to the most any VO's wordings combine.
+const wordingMax = computed(() => wordingMixesAvailable(bundle.value.items))
+function saveWordings() {
+  form.wording_variations = Math.min(wordingMax.value, Math.max(0, Math.round(Number(form.wording_variations) || 0)))
+  if (form.wording_variations !== shoot.value.wording_variations) saveSetup()
 }
 
 const saveSetup = () => patchShoot({
@@ -616,7 +638,9 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
       : [{ label: 'Export', icon: 'i-lucide-download', children: exportItems.value }],
     [
       ...(admin && status === 'planned' ? [{ label: 'Back to draft', icon: 'i-lucide-lock-open', onSelect: () => { confirmUnplan.value = true } }] : []),
+      ...(admin && status === 'filmed' && remaining.value > 0 ? [{ label: 'Resume shoot', icon: 'i-lucide-rotate-ccw', onSelect: () => controls.value?.resume() }] : []),
       ...(admin && (status === 'shooting' || status === 'filmed') ? [{ label: 'Revert to planned', icon: 'i-lucide-history', onSelect: () => { confirmRevert.value = true } }] : []),
+      ...(admin && status === 'editing' ? [{ label: 'Back to filmed', icon: 'i-lucide-undo-2', onSelect: () => editing.value?.backToFilmed() }] : []),
       ...(admin && status === 'edited'
         ? [{
             label: 'Back to editing',
@@ -691,7 +715,45 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
               :variant="shoot.status === 'shooting' ? 'solid' : 'subtle'"
               :to="`/shoots/${shoot.code}/sheet`"
             />
-            <ShootControls :shoot="shoot" :remaining="remaining" icon-on-mobile @changed="refresh" />
+            <ShootControls ref="controls" :shoot="shoot" :remaining="remaining" icon-on-mobile no-resume @changed="refresh" />
+            <!-- filmed → editing → Live: the next step, as for every other status -->
+            <template v-if="isAdmin && editing">
+              <UButton
+                v-if="shoot.status === 'filmed'"
+                label="Send for editing"
+                aria-label="Send for editing"
+                :ui="ICON_ON_MOBILE"
+                class="max-sm:px-1.5"
+                icon="i-lucide-scissors"
+                :loading="editing.starting"
+                @click="editing.startEditing()"
+              />
+              <template v-else-if="shoot.status === 'editing'">
+                <UButton
+                  :label="editing.checking ? 'Checking…' : editing.result ? 'Check again' : 'Check edits'"
+                  aria-label="Check edits"
+                  :ui="ICON_ON_MOBILE"
+                  class="max-sm:px-1.5"
+                  icon="i-lucide-scan-search"
+                  :color="editing.result ? 'neutral' : 'primary'"
+                  :variant="editing.result ? 'subtle' : 'solid'"
+                  :loading="editing.checking"
+                  @click="editing.check()"
+                />
+                <UButton
+                  v-if="editing.result"
+                  :label="editing.result.ok ? 'Go Live' : 'Go Live anyway'"
+                  aria-label="Go Live"
+                  :ui="ICON_ON_MOBILE"
+                  class="max-sm:px-1.5"
+                  :icon="editing.result.ok ? 'i-lucide-radio' : 'i-lucide-triangle-alert'"
+                  :color="editing.result.ok ? 'success' : 'error'"
+                  :variant="editing.result.ok ? 'solid' : 'subtle'"
+                  :loading="editing.saving"
+                  @click="editing.goLive(!editing.result.ok)"
+                />
+              </template>
+            </template>
           </template>
         </template>
       </UDashboardNavbar>
@@ -775,6 +837,9 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
           </div>
         </section>
 
+        <!-- filmed → editing (Klip) → Live: run from the top bar; while editing, Klip's progress and the check -->
+        <PlannerEditing v-if="isAdmin && (shoot.status === 'filmed' || shoot.status === 'editing')" ref="editing" :bundle="bundle" @changed="refresh" />
+
         <UTabs
           v-model="tab"
           :items="tabItems"
@@ -827,8 +892,6 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
               </ul>
             </template>
           </UAlert>
-          <!-- filmed → editing (Klip) → Live: check the edits, build the recipes -->
-          <PlannerEditing v-if="isAdmin && (shoot.status === 'filmed' || shoot.status === 'editing')" :bundle="bundle" @changed="refresh" />
           <!-- slots nothing fills yet: fill them here (drafts only; planning freezes the scripts) -->
           <PlannerSlotFiller v-if="isDraft" :bundle="bundle" @changed="refresh" />
           <UAlert
@@ -957,8 +1020,8 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
               <UFormField label="Cast mixes" help="On a channel where a VO is cast on several people, how many mixes of their beats to make, alongside each person's own. 0 = no mixing.">
                 <UInput v-model.number="form.vo_variations" type="number" min="0" max="50" class="w-full" :disabled="!isDraft" @change="saveSetup" />
               </UFormField>
-              <UFormField label="Wording mixes" help="Where a VO's beats have other wordings, how many extra combinations of them to make per person, alongside the first wordings. 0 = first wordings only.">
-                <UInput v-model.number="form.wording_variations" type="number" min="0" max="50" class="w-full" :disabled="!isDraft" @change="saveSetup" />
+              <UFormField label="Wording mixes" :help="`Where a VO's beats have other wordings, how many extra combinations of them to make per person, alongside the first wordings. 0 = first wordings only. Up to ${wordingMax} here. Can change until the first batch${live ? ' (in the Batches tab)' : ''}.`">
+                <UInput v-model.number="form.wording_variations" type="number" min="0" :max="wordingMax" class="w-full" @change="saveWordings" />
               </UFormField>
               <UFormField label="Kit" help="Just a tag for this shoot (e.g. Audition = trial shoot for a new brand, Scale = full production). It doesn't change anything else.">
                 <USelect v-model="form.kit" :items="kits" class="w-full" @update:model-value="saveSetup" />
