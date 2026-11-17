@@ -493,6 +493,22 @@ async function backToDraft() {
   if (ok) confirmUnplan.value = false
 }
 
+// Live back to editing: only once it has no batches (they name its recipes by id). Going Live
+// again checks Klip's edits and rebuilds the manifest and every recipe.
+async function backToEditing() {
+  if (!(await confirmDialog({
+    title: `Take ${shoot.value.code} back to editing?`,
+    description: 'It stops being Live. Check Klip\'s edits again and go Live to rebuild the manifest and recipes. Nothing in Dropbox is deleted.',
+    confirmLabel: 'Back to editing'
+  }))) return
+  busy.value = true
+  await run(async () => {
+    must(await db.from('shoots').update({ status: 'editing' }).eq('id', shoot.value.id).eq('status', 'edited'))
+    await refresh()
+  }, 'Back to editing')
+  busy.value = false
+}
+
 const confirmPlan = ref(false)
 
 // --- stale ---------------------------------------------------------------------
@@ -601,6 +617,15 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
     [
       ...(admin && status === 'planned' ? [{ label: 'Back to draft', icon: 'i-lucide-lock-open', onSelect: () => { confirmUnplan.value = true } }] : []),
       ...(admin && (status === 'shooting' || status === 'filmed') ? [{ label: 'Revert to planned', icon: 'i-lucide-history', onSelect: () => { confirmRevert.value = true } }] : []),
+      ...(admin && status === 'edited'
+        ? [{
+            label: 'Back to editing',
+            icon: 'i-lucide-scissors',
+            disabled: loop.batches.value.length > 0,
+            description: loop.batches.value.length ? 'Reset its batches first (Batches tab)' : undefined,
+            onSelect: backToEditing
+          }]
+        : []),
       ...(admin
         ? [{
             label: stale.value ? 'Not stale' : 'Mark stale',

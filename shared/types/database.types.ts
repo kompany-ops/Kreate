@@ -2804,6 +2804,7 @@ export type Database = {
         Returns: undefined
       }
       renumber_shoot_items: { Args: { p_shoot_id: string }; Returns: undefined }
+      reset_batches: { Args: { p_shoot_id: string }; Returns: string[] }
       revert_shoot: { Args: { p_shoot_id: string }; Returns: undefined }
       set_active_org: { Args: { p_org_id: string }; Returns: undefined }
       set_channel_members: {
@@ -2815,6 +2816,7 @@ export type Database = {
         Returns: undefined
       }
       sign_out_klip_everywhere: { Args: never; Returns: string }
+      undo_batch: { Args: { p_shoot_id: string }; Returns: string }
       update_my_profile: {
         Args: { p_display_name: string; p_photo_url: string }
         Returns: undefined

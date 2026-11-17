@@ -100,6 +100,65 @@ async function advance(batch: BatchRow, status: BatchStatus) {
   await run(() => loop.setStatus(batch, status), `${batch.code}: ${BATCH_STATUS_LABELS[status]}`)
 }
 
+// --- taking batches back -----------------------------------------------------------------
+// Undo the latest batch, or reset them all: the rows and their scores go (the database keeps it
+// to the latest, since each batch was picked from the scores before it), then the batch files and
+// renders folders in Dropbox. Its recipes can be batched again and the next batch reuses the code.
+const { confirmDialog } = useConfirm()
+const undoing = ref(false)
+const latest = computed(() => batches.value.at(-1) ?? null)
+
+async function removeFiles(codes: string[]) {
+  const failed: string[] = []
+  for (const code of codes) {
+    for (const path of [`${base.value}/batches/${code}.json`, `${base.value}/batches/${code}.csv`, `${base.value}/renders/${code}`]) {
+      await dropboxUploader.remove(path, true).catch(() => failed.push(path))
+    }
+  }
+  if (failed.length) {
+    toast.add({ title: 'Some files are still in Dropbox', description: `Delete them by hand: ${failed.join(', ')}`, color: 'warning', icon: 'i-lucide-cloud-alert', duration: 0 })
+  }
+}
+
+async function undoLatest() {
+  const batch = latest.value
+  if (!batch || !(await confirmDialog({
+    title: `Undo ${batch.code}?`,
+    description: `${batch.code} and its scores are deleted, and its ${batch.size} recipe${batch.size === 1 ? '' : 's'} can be batched again. Its batch files and renders/${batch.code}/ folder (with anything Showdog rendered) go to Dropbox's deleted files.`,
+    confirmLabel: `Undo ${batch.code}`,
+    danger: true
+  }))) return
+  undoing.value = true
+  const ok = await run(async () => {
+    const code = must(await db.rpc('undo_batch', { p_shoot_id: shoot.value.id })) as string
+    await removeFiles([code])
+  }, `${batch.code} undone`)
+  undoing.value = false
+  if (ok) {
+    await loop.load()
+    emit('changed')
+  }
+}
+
+async function resetAll() {
+  if (!batches.value.length || !(await confirmDialog({
+    title: `Reset all ${batches.value.length} batches?`,
+    description: `${batches.value.map(batch => batch.code).join(', ')} and all their scores are deleted, so batching starts again from B01 with every recipe. Their batch files and renders folders go to Dropbox's deleted files. Elements you dropped or kept by hand stay that way.`,
+    confirmLabel: 'Reset batches',
+    danger: true
+  }))) return
+  undoing.value = true
+  const ok = await run(async () => {
+    const codes = must(await db.rpc('reset_batches', { p_shoot_id: shoot.value.id })) as string[]
+    await removeFiles(codes)
+  }, 'Batches reset: start again from B01')
+  undoing.value = false
+  if (ok) {
+    await loop.load()
+    emit('changed')
+  }
+}
+
 // --- measuring: score every element a batch used ----------------------------------------
 const measuring = ref<BatchRow | null>(null)
 const measureElements = computed(() => measuring.value ? batchElements(loop.batchRecipes(measuring.value)) : [])
@@ -256,6 +315,19 @@ const KIND_ICONS: Record<ElementKind, string> = {
           :variant="batch.status === 'measured' ? 'ghost' : 'solid'"
           @click="measuring = batch"
         />
+        <UButton
+          v-if="isAdmin && batch.id === latest?.id"
+          label="Undo"
+          icon="i-lucide-undo-2"
+          size="xs"
+          color="error"
+          variant="ghost"
+          :loading="undoing"
+          @click="undoLatest"
+        />
+      </li>
+      <li v-if="isAdmin && batches.length > 1" class="flex justify-end px-3 py-2">
+        <UButton label="Reset all batches" icon="i-lucide-rotate-ccw" size="xs" color="error" variant="ghost" :loading="undoing" @click="resetAll" />
       </li>
     </ul>
 
