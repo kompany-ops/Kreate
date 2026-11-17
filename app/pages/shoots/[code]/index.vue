@@ -587,7 +587,10 @@ async function markPlanned() {
     // freezes the filled scripts into the snapshots so later template or product edits can't change this shoot
     await planShoot(db, bundle.value)
     await refresh()
-  }, 'Shoot planned. Exports are ready.')
+  }, {
+    title: 'Shoot planned: codes and scripts are frozen',
+    description: 'Library and product edits no longer affect it. You can still add per-person wording, locations and b-roll shots. Exports are ready.'
+  })
   busy.value = false
   confirmPlan.value = false
   if (planned) createDropboxFolders(true)
@@ -811,7 +814,7 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
             </div>
             <div class="flex items-center justify-between gap-2 max-lg:col-span-2 sm:max-lg:col-span-1">
               <button
-                v-if="(isDraft ? blockers.length : 0) + result.warnings.length + unfilled.length"
+                v-if="(isDraft ? blockers.length : 0) + unfilled.length"
                 type="button"
                 class="text-left"
                 @click="tab = 'general'"
@@ -821,7 +824,7 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
                 </p>
                 <p class="flex items-center gap-1 font-medium text-warning tabular-nums">
                   <UIcon name="i-lucide-triangle-alert" class="size-4" />
-                  {{ (isDraft ? blockers.length : 0) + result.warnings.length + unfilled.length }}
+                  {{ (isDraft ? blockers.length : 0) + unfilled.length }}
                 </p>
               </button>
               <div v-else>
@@ -832,7 +835,18 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
                   {{ result.totals.brollShots }}
                 </p>
               </div>
-              <UButton icon="i-lucide-calculator" size="lg" color="neutral" variant="subtle" @click="calculatorOpen = true" />
+              <!-- the calculator's warnings live in the calculator: the button says how many -->
+              <UChip :text="result.warnings.length" :show="result.warnings.length > 0" color="warning" size="3xl">
+                <UButton
+                  icon="i-lucide-calculator"
+                  size="lg"
+                  :color="result.warnings.length ? 'warning' : 'neutral'"
+                  variant="subtle"
+                  :aria-label="result.warnings.length ? `Calculator: ${result.warnings.length} warning${result.warnings.length === 1 ? '' : 's'}` : 'Calculator'"
+                  :title="result.warnings.length ? `${result.warnings.length} warning${result.warnings.length === 1 ? '' : 's'} in the calculator` : undefined"
+                  @click="calculatorOpen = true"
+                />
+              </UChip>
             </div>
           </div>
         </section>
@@ -865,29 +879,6 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
               <ul class="list-disc pl-4">
                 <li v-for="blocker in blockers" :key="blocker">
                   {{ blocker }}
-                </li>
-              </ul>
-            </template>
-          </UAlert>
-          <UAlert
-            v-else-if="!isDraft"
-            color="info"
-            variant="subtle"
-            icon="i-lucide-lock"
-            :title="live ? 'Live: the shoot is locked' : 'Codes and scripts are frozen'"
-            :description="live ? 'Its recipes are built from the edited clips, so nothing here can change. Batches are made, tracked and measured in the Batches tab.' : shoot.status === 'planned' ? 'Library and product edits no longer affect this shoot. You can still add per-person wording, locations and b-roll shots, or use Back to draft to change the plan.' : 'Library and product edits no longer affect this shoot. You can still add per-person wording, locations and b-roll shots.'"
-          />
-          <UAlert
-            v-if="result.warnings.length"
-            color="warning"
-            variant="subtle"
-            icon="i-lucide-triangle-alert"
-            :title="`${result.warnings.length} warning${result.warnings.length === 1 ? '' : 's'} from the calculator`"
-          >
-            <template #description>
-              <ul class="list-disc pl-4">
-                <li v-for="warning in result.warnings" :key="warning">
-                  {{ warning }}
                 </li>
               </ul>
             </template>

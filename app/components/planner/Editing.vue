@@ -155,7 +155,7 @@ async function goLive(override = false) {
     await writeLiveFiles(base.value, shoot.value.code, manifest)
     must(await db.from('shoot_manifests').insert({ shoot_id: shoot.value.id, version, data: manifest as unknown as Json }))
     must(await db.from('shoots').update({ status: 'edited' }).eq('id', shoot.value.id).eq('status', 'editing'))
-  }, 'Live: the recipes are built')
+  }, { title: 'Live: the recipes are built', description: 'The shoot is locked. Batches are made, tracked and measured in the Batches tab.' })
   saving.value = false
   if (!ok) return
   result.value = null
@@ -165,18 +165,30 @@ async function goLive(override = false) {
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
+// collapsed by default; a check that finds problems opens it so they're seen
+const open = ref(false)
+watch(result, value => { if (value && !value.ok) open.value = true })
+
 // the shoot page's top bar runs these: every status change lives there (next step) or in Actions (back)
 defineExpose({ startEditing, backToFilmed, check, goLive, starting, checking, saving, result })
 </script>
 
 <template>
-  <UCard v-if="shoot.status === 'editing'" :ui="{ body: 'space-y-3' }">
+  <UCard v-if="shoot.status === 'editing'" :ui="{ header: open ? undefined : 'border-b-0', body: open ? 'space-y-3' : 'hidden' }">
+    <template #header>
+      <button type="button" class="flex w-full items-center gap-2 text-left" :aria-expanded="open" @click="open = !open">
+        <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted transition-transform" :class="{ 'rotate-90': open }" />
+        <UIcon name="i-lucide-scissors" class="size-4 shrink-0 text-warning" />
+        <span class="flex-1 font-medium text-highlighted">Editing</span>
+        <span v-if="latest" class="hidden text-xs text-muted sm:inline">Klip's manifest v{{ latest.version }}</span>
+        <UBadge v-if="checking" label="Checking…" color="neutral" variant="subtle" size="sm" />
+        <UBadge v-else-if="result?.ok" label="Checks out" color="success" variant="subtle" size="sm" />
+        <UBadge v-else-if="result" :label="`${result.problems.length} to fix`" color="error" variant="subtle" size="sm" />
+        <UBadge v-else label="Not checked" color="neutral" variant="outline" size="sm" />
+      </button>
+    </template>
     <div class="flex items-start gap-3">
-      <UIcon name="i-lucide-scissors" class="mt-0.5 size-6 shrink-0 text-warning" />
       <div class="min-w-0 flex-1">
-        <p class="font-medium text-highlighted">
-          Editing
-        </p>
         <p class="text-sm text-muted">
           <template v-if="latest">
             Klip's manifest v{{ latest.version }}, {{ when(latest.created_at) }}.

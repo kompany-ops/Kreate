@@ -23,10 +23,11 @@ export function mustOne<R extends DbResult>(result: R): NonNullable<DataOf<R>> {
 /** Run a mutation with a toast on failure (and optionally on success). Returns true when it succeeded. */
 export function useAction() {
   const toast = useToast()
-  return async function run(action: () => Promise<unknown>, success?: string): Promise<boolean> {
+  /** `success`: a toast title, or a title and a line of what it means */
+  return async function run(action: () => Promise<unknown>, success?: string | { title: string, description: string }): Promise<boolean> {
     try {
       await action()
-      if (success) toast.add({ title: success, color: 'success', icon: 'i-lucide-circle-check' })
+      if (success) toast.add({ ...(typeof success === 'string' ? { title: success } : success), color: 'success', icon: 'i-lucide-circle-check' })
       return true
     } catch (error) {
       toast.add({
