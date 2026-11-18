@@ -281,7 +281,7 @@ Hooks, CTAs and VOs written in a shoot (`shoot_id` set) can be deleted (RLS), wh
 - `started_at`, `started_by`, `ended_at`, `ended_by` — stamped by trigger on status changes only
 - `broll_variations int default 1` (≥ 1) — different b-roll selections per hook + VO + CTA, each its own recipe; also how many clips each channel films of every b-roll shot (the checklist wants that many)
 - `vo_variations int default 1` (≥ 0) — **Cast mixes**: mixed versions per VO per channel, beats swapped between the people cast on it (0 = no mixing)
-- `wording_variations int default 1` (≥ 0) — **Wording mixes**: extra versions per VO per person from combining its beats' alternate wordings (0 = first wordings only). Capped at the most any VO's wordings combine. It only shapes the recipes, so it can change until the first batch: in Setup until Live, then in the Batches tab, where a change writes a new manifest version and rebuilds `recipes.json`
+- `wording_variations int default 1` (≥ 0) — **Wording mixes**: extra versions per VO per person from combining its beats' alternate wordings (0 = first wordings only). Capped at the most any VO's wordings combine. It only shapes the recipes, so it can change in Setup until the first batch; on a Live shoot a change writes a new manifest version and rebuilds `recipes.json`
 - `submission_rate numeric` — defaults from settings
 - `slot_values jsonb default '{}'` — the custom slots filled in for this shoot, e.g. `{"benefit": "calmer walks", "offer": "20% off"}` (the planner's Fill in slots)
 - `runway_target int default 60` — target submissions per channel per month, for runway
@@ -630,7 +630,7 @@ Once a shoot is Live its details lock (nothing in the plan's tabs can change), t
 **Batches** (a batch is what gets rendered and submitted to the brand; `shared/utils/batchLoop.ts`):
 
 - **The loop**: each batch goes **Batched** → **Rendering** (Klip) → **Submitted** (to the brand) → **Measured**. The next batch can only be made once every batch before it is measured, so each learns from the last.
-- **Size** = the shoot's batch size (default 5%) × all valid recipes, at least one.
+- **Size** = the shoot's batch size (default 5%) × all valid recipes, at least one. It's set in Setup and, for the next batch, in the Batches tab (the same setting; it shows how many recipes that is).
 - **Never batch a recipe ID twice** (`shoot_shortlists.entry_ids`): no recipe is in more than one batch.
 - **Measuring** scores every element the batch used (`batch_scores`): its treatments, hooks, formats, hook types, VOs, CTAs and people (b-roll isn't scored; a standalone VO's hook and CTA are scored with the VO), each **Winner**, **Mid** or **Loser**, by Motion's benchmark definitions, judged on the ads that used it once they've had time to spend:
   - **Winner**: at least one ad with it spent 10× the account's median ad, and at least $500;

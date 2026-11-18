@@ -7,6 +7,7 @@ import { brollChannelIds, brollShortfalls } from '#shared/utils/shootsheet'
 import type { Beat } from '#shared/utils/slots'
 import type { EditsCheck } from '#shared/utils/manifest'
 import { wordingMixesAvailable } from '#shared/utils/recipes'
+import type { Json } from '#shared/types/database.types'
 import type { PickedItems } from '~/components/planner/ItemPicker.vue'
 import type { BrollFormat } from '~/components/planner/Broll.vue'
 
@@ -109,11 +110,33 @@ async function patchShoot(patch: Update<'shoots'>) {
 }
 
 // Wording mixes only shape the recipes, not what's filmed, so they can change until the first
-// batch (once Live, in the Batches tab), up to the most any VO's wordings combine.
+// batch, up to the most any VO's wordings combine. On a Live shoot, a change writes a new manifest
+// version with the new number and rebuilds recipes.json from it.
 const wordingMax = computed(() => wordingMixesAvailable(bundle.value.items))
-function saveWordings() {
-  form.wording_variations = Math.min(wordingMax.value, Math.max(0, Math.round(Number(form.wording_variations) || 0)))
-  if (form.wording_variations !== shoot.value.wording_variations) saveSetup()
+const wordingLocked = computed(() => live.value && (!isAdmin.value || loop.batches.value.length > 0))
+const savingWordings = ref(false)
+async function saveWordings() {
+  const value = Math.min(wordingMax.value, Math.max(0, Math.round(Number(form.wording_variations) || 0)))
+  form.wording_variations = value
+  if (value === shoot.value.wording_variations) return
+  if (!live.value) return saveSetup()
+  const manifest = loop.manifest.value
+  if (!manifest || wordingLocked.value) return
+  savingWordings.value = true
+  let made = 0
+  const ok = await run(async () => {
+    const status = await dropbox.refresh().catch(() => null)
+    if (!status?.connected) throw new Error('Dropbox isn\'t connected: someone on the team can connect it in Settings → Dropbox')
+    const next = { ...manifest, version: manifest.version + 1, generated_at: new Date().toISOString(), plan: { ...manifest.plan, shoot: { ...manifest.plan.shoot, wording_variations: value } } }
+    made = (await writeLiveFiles(shootFolder(bundle.value), shoot.value.code, next)).length
+    must(await db.from('shoot_manifests').insert({ shoot_id: shoot.value.id, version: next.version, data: next as unknown as Json }))
+    must(await db.from('shoots').update({ wording_variations: value }).eq('id', shoot.value.id))
+    await refresh()
+    await loop.load()
+  })
+  savingWordings.value = false
+  if (ok) toast.add({ title: `Wording mixes: ${value}`, description: `Recipes rebuilt: ${made}`, color: 'success', icon: 'i-lucide-circle-check' })
+  else form.wording_variations = shoot.value.wording_variations
 }
 
 const saveSetup = () => patchShoot({
@@ -1018,8 +1041,8 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
               <UFormField label="Cast mixes" help="On a channel where a VO is cast on several people, how many mixes of their beats to make, alongside each person's own. 0 = no mixing.">
                 <UInput v-model.number="form.vo_variations" type="number" min="0" max="50" class="w-full" :disabled="!isDraft" @change="saveSetup" />
               </UFormField>
-              <UFormField label="Wording mixes" :help="`Where a VO's beats have other wordings, how many extra combinations of them to make per person, alongside the first wordings. 0 = first wordings only. Up to ${wordingMax} here. Can change until the first batch${live ? ' (in the Batches tab)' : ''}.`">
-                <UInput v-model.number="form.wording_variations" type="number" min="0" :max="wordingMax" class="w-full" @change="saveWordings" />
+              <UFormField label="Wording mixes" :help="`Where a VO's beats have other wordings, how many extra combinations of them to make per person, alongside the first wordings. 0 = first wordings only. Up to ${wordingMax} here. Can change until the first batch${live ? ' (the recipes are rebuilt)' : ''}.`" :class="{ 'pointer-events-auto opacity-100': live && !wordingLocked }">
+                <UInput v-model.number="form.wording_variations" type="number" min="0" :max="wordingMax" class="w-full" :disabled="wordingLocked" :loading="savingWordings" @change="saveWordings" />
               </UFormField>
               <UFormField label="Kit" help="Just a tag for this shoot (e.g. Audition = trial shoot for a new brand, Scale = full production). It doesn't change anything else.">
                 <USelect v-model="form.kit" :items="kits" class="w-full" @update:model-value="saveSetup" />

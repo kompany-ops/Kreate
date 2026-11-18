@@ -44,7 +44,9 @@ describe('the Klip contract', () => {
   it('matches Klip’s copy, when Klip is checked out beside Kreate', () => {
     const klip = new URL('../../Klip/docs/contract.md', import.meta.url)
     if (!existsSync(klip)) return
-    expect(readFileSync(klip, 'utf8')).toBe(contract)
+    // the same text, whatever line endings each checkout has
+    const lf = (text: string) => text.replace(/\r\n/g, '\n')
+    expect(lf(readFileSync(klip, 'utf8'))).toBe(lf(contract))
     expect(JSON.parse(readFileSync(new URL('../../Klip/docs/contract/_klip.example.json', import.meta.url), 'utf8'))).toEqual(example)
   })
 

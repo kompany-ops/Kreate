@@ -2,8 +2,6 @@
 import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { Element, ElementKind, Score } from '#shared/utils/batchLoop'
 import type { BatchLoop, BatchRow, BatchStatus } from '~/composables/useBatchLoop'
-import type { Json } from '#shared/types/database.types'
-import { wordingMixesAvailable } from '#shared/utils/recipes'
 
 // A Live shoot's batches (spec §14b). Each goes batched -> rendering (Showdog) -> submitted (to the
 // brand) -> measured: every element it used is scored winner, mid or loser by the guidelines. Once
@@ -26,7 +24,19 @@ const loop = props.loop
 const { batches, recipes, batched, records, canBatch } = loop
 
 // --- the next batch ----------------------------------------------------------------------
-const size = computed(() => batchSize(recipes.value.length, Number(shoot.value.submission_rate)))
+// the batch size: the shoot's share of the valid recipes (Setup's Batch size), set here for each batch too
+const sizePct = ref(Math.round(Number(shoot.value.submission_rate) * 1000) / 10)
+watch(() => shoot.value.submission_rate, value => sizePct.value = Math.round(Number(value) * 1000) / 10)
+const size = computed(() => batchSize(recipes.value.length, Math.min(100, Math.max(0, Number(sizePct.value) || 0)) / 100))
+async function saveSize() {
+  const pct = Math.min(100, Math.max(0.5, Math.round((Number(sizePct.value) || 0) * 2) / 2))
+  sizePct.value = pct
+  if (pct === Math.round(Number(shoot.value.submission_rate) * 1000) / 10) return
+  await run(async () => {
+    must(await db.from('shoots').update({ submission_rate: pct / 100 }).eq('id', shoot.value.id))
+  })
+  emit('changed')
+}
 const nextCode = computed(() => nextBatchCode(batches.value.map(batch => batch.code)))
 const exploitPct = ref(Math.round(Number(shoot.value.exploit_share ?? DEFAULT_EXPLOIT_SHARE) * 100))
 watch(() => shoot.value.exploit_share, value => exploitPct.value = Math.round(Number(value ?? DEFAULT_EXPLOIT_SHARE) * 100))
@@ -100,40 +110,6 @@ const NEXT: Partial<Record<BatchStatus, { status: BatchStatus, label: string, ic
 }
 async function advance(batch: BatchRow, status: BatchStatus) {
   await run(() => loop.setStatus(batch, status), `${batch.code}: ${BATCH_STATUS_LABELS[status]}`)
-}
-
-// --- wording mixes, until the first batch -------------------------------------------------
-// They only shape the recipes, so before anything is batched they can change: a new manifest
-// version with the new number, and recipes.json rebuilt from it.
-const wordingMax = computed(() => wordingMixesAvailable(props.bundle.items))
-const wordingMixes = ref(Number(loop.manifest.value?.plan.shoot.wording_variations ?? shoot.value.wording_variations ?? 0))
-watch(() => loop.manifest.value?.plan.shoot.wording_variations, value => wordingMixes.value = Number(value ?? 0))
-const savingWordings = ref(false)
-async function saveWordings() {
-  const manifest = loop.manifest.value
-  const value = Math.min(wordingMax.value, Math.max(0, Math.round(Number(wordingMixes.value) || 0)))
-  wordingMixes.value = value
-  if (!manifest || value === Number(manifest.plan.shoot.wording_variations ?? 0)) return
-  const status = await dropbox.refresh().catch(() => null)
-  if (!status?.connected) {
-    toast.add({ title: 'Dropbox isn\'t connected', description: 'Someone on the team can connect it in Settings → Dropbox.', color: 'warning', icon: 'i-lucide-cloud-off' })
-    return
-  }
-  savingWordings.value = true
-  let made = 0
-  const ok = await run(async () => {
-    if (batches.value.length) throw new Error('This shoot has batches: reset them first')
-    const next = { ...manifest, version: manifest.version + 1, generated_at: new Date().toISOString(), plan: { ...manifest.plan, shoot: { ...manifest.plan.shoot, wording_variations: value } } }
-    made = (await writeLiveFiles(base.value, shoot.value.code, next)).length
-    must(await db.from('shoot_manifests').insert({ shoot_id: shoot.value.id, version: next.version, data: next as unknown as Json }))
-    must(await db.from('shoots').update({ wording_variations: value }).eq('id', shoot.value.id))
-  })
-  savingWordings.value = false
-  if (ok) {
-    toast.add({ title: `Wording mixes: ${value}`, description: `Recipes rebuilt: ${made}`, color: 'success', icon: 'i-lucide-check' })
-    await loop.load()
-    emit('changed')
-  }
 }
 
 // --- taking batches back -----------------------------------------------------------------
@@ -290,7 +266,7 @@ const KIND_ICONS: Record<ElementKind, string> = {
             Measure {{ waitingOn.join(', ') }} first: each batch learns from the scores of the ones before it.
           </p>
           <p v-else class="text-sm text-muted">
-            {{ formatNumber(preview.recipes.length) }} recipes ({{ Math.round(Number(shoot.submission_rate) * 1000) / 10 }}% of {{ formatNumber(recipes.length) }}):
+            {{ formatNumber(preview.recipes.length) }} recipes ({{ sizePct }}% of {{ formatNumber(recipes.length) }}):
             <template v-if="preview.exploit">
               {{ formatNumber(preview.exploit) }} exploit winners, {{ formatNumber(preview.explore) }} explore.
             </template>
@@ -313,6 +289,16 @@ const KIND_ICONS: Record<ElementKind, string> = {
         />
       </div>
       <div v-if="isAdmin" class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-muted">Batch size</span>
+        <UInput v-model.number="sizePct" type="number" min="0.5" max="100" step="0.5" class="w-24" size="sm" @change="saveSize">
+          <template #trailing>
+            <span class="text-xs text-muted">%</span>
+          </template>
+        </UInput>
+        <span class="text-muted">· {{ formatNumber(size) }} of {{ formatNumber(recipes.length) }} recipes</span>
+        <span class="text-xs text-dimmed">The share of the shoot's recipes each batch takes (at least one). Also the shoot's Batch size in Setup.</span>
+      </div>
+      <div v-if="isAdmin" class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted">Exploit</span>
         <UInput v-model.number="exploitPct" type="number" min="0" max="100" class="w-20" size="sm" @change="saveShare">
           <template #trailing>
@@ -321,12 +307,6 @@ const KIND_ICONS: Record<ElementKind, string> = {
         </UInput>
         <span class="text-muted">· explore {{ 100 - exploitPct }}%</span>
         <span class="text-xs text-dimmed">Exploit: recipes with elements that have won. Explore: recipes with elements not tried yet.</span>
-      </div>
-      <div v-if="isAdmin && !batches.length && wordingMax > 0" class="flex flex-wrap items-center gap-2 text-sm">
-        <span class="text-muted">Wording mixes</span>
-        <UInput v-model.number="wordingMixes" type="number" min="0" :max="wordingMax" class="w-20" size="sm" :disabled="savingWordings" @change="saveWordings" />
-        <span class="text-muted">of {{ wordingMax }}</span>
-        <span class="text-xs text-dimmed">Extra combinations of each VO's wordings. Changing it rebuilds the recipes; it locks once the first batch is made.</span>
       </div>
     </UCard>
 
