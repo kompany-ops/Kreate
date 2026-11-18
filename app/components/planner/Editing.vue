@@ -32,8 +32,10 @@ onMounted(loadLatest)
 
 /** The shoot as Klip was given it: the treatments it was told to make, even if the Library's changed since. */
 const handedOff = computed(() => {
-  const treatments = latest.value?.data.plan?.treatments
-  return treatments ? { ...props.bundle, treatments: treatments as unknown as BundleTreatment[] } : props.bundle
+  const treatments = latest.value?.data.plan?.treatments as unknown as BundleTreatment[] | undefined
+  // less one: Over b-roll was retired (hooks and CTAs never go over b-roll), and Klip makes nothing for it
+  const overBroll = (treatment: BundleTreatment): boolean => (treatment.settings as { show?: string } | null)?.show === 'broll' || !!treatment.parts?.some(overBroll)
+  return treatments ? { ...props.bundle, treatments: treatments.filter(treatment => !overBroll(treatment)) } : props.bundle
 })
 /** the treatments Klip makes something for, as it was given them */
 const ingredients = computed(() => shootIngredients(handedOff.value))

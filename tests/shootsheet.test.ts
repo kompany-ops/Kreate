@@ -321,10 +321,11 @@ describe('VO takes', () => {
     expect(sheetVo.beats[1]!.file).toMatch(/\/problem\/V01-2$/)
   })
 
-  it('shows a standalone format\u2019s hook and CTA beats face to camera unless the format says otherwise', () => {
-    const standalone = { kind: 'standalone', beat_display: { cta: 'broll' } }
-    expect(beatShow(standalone, 'hook')).toBe('face')
-    expect(beatShow(standalone, 'cta')).toBe('broll')
+  it('shows a standalone format\u2019s hook and CTA beats face to camera, never over b-roll', () => {
+    const standalone = { kind: 'standalone', beat_display: { cta: 'broll', hook: 'screen' } }
+    expect(beatShow(standalone, 'hook')).toBe('screen')
+    expect(beatShow(standalone, 'cta')).toBe('face')
+    expect(beatShow({ kind: 'standalone', beat_display: {} }, 'hook')).toBe('face')
     expect(beatShow(standalone, 'story')).toBe('broll')
     expect(beatShow({ kind: 'modular', beat_display: { problem: 'face' } }, 'problem')).toBe('face')
     expect(beatShow(null, 'hook')).toBe('broll')

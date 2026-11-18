@@ -118,15 +118,17 @@ export function usedByRecipes(item: Pick<BundleItem, 'kind' | 'channel_id'>, ite
  * - face: the speaker on camera; broll: their voice over b-roll (layout treatments can switch these);
  * - screen: its text as a message bubble on a phone screen, not filmed (its length is its reading time);
  * - voice_note: a voice-note bubble on that screen, playing the take's sound (filmed like any beat).
- * Set per beat on the format; a standalone format's hook and CTA beats default to face, everything
- * else to b-roll.
+ * Set per beat on the format; a standalone format's hook and CTA beats default to face and are
+ * never over b-roll, everything else defaults to b-roll.
  */
 export type BeatShow = 'face' | 'broll' | 'screen' | 'voice_note'
 export const BEAT_SHOWS: BeatShow[] = ['face', 'broll', 'screen', 'voice_note']
 export function beatShow(format: Pick<NonNullable<BundleItem['format']>, 'kind' | 'beat_display'> | null | undefined, beat: string): BeatShow {
   const set = format?.beat_display?.[beat]
-  if (BEAT_SHOWS.includes(set as BeatShow)) return set as BeatShow
-  return format?.kind === 'standalone' && (beat === STANDALONE_HOOK_BEAT || beat === STANDALONE_CTA_BEAT) ? 'face' : 'broll'
+  const ends = format?.kind === 'standalone' && (beat === STANDALONE_HOOK_BEAT || beat === STANDALONE_CTA_BEAT)
+  // a hook or CTA is never over b-roll
+  if (BEAT_SHOWS.includes(set as BeatShow) && !(ends && set === 'broll')) return set as BeatShow
+  return ends ? 'face' : 'broll'
 }
 /** a beat shown on screen is text, not filmed: it has no take */
 export const isFilmed = (show: BeatShow) => show !== 'screen'

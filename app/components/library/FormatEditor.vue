@@ -78,17 +78,21 @@ watch(() => form.kind, (kind) => {
   form.beats = kind === 'standalone' ? [HOOK, ...middle, CTA] : middle.length ? middle : [...DEFAULT_BEATS]
 })
 /** how a beat is shown, as the format would play it: set, or the default for its place */
-const showOf = (beat: string): BeatShow =>
-  form.beat_display[beat] ?? (isStandalone.value && (beat === HOOK || beat === CTA) ? 'face' : 'broll')
-// how each beat is shown. Face and b-roll are the default layout (the Face to camera and Over
-// b-roll treatments make whole-video versions on top); a beat on screen is a text message, not
-// filmed; a voice note plays the take's sound in a bubble on that screen (a text thread)
+const showOf = (beat: string): BeatShow => {
+  const ends = isStandalone.value && (beat === HOOK || beat === CTA)
+  const set = form.beat_display[beat]
+  return set && !(ends && set === 'broll') ? set : ends ? 'face' : 'broll'
+}
+// how each beat is shown. Face and b-roll are the default layout (the Face to camera treatment
+// makes a whole-video version on top); a beat on screen is a text message, not filmed; a voice note
+// plays the take's sound in a bubble on that screen (a text thread). A hook or CTA is never over b-roll.
 const showItems = [
   { label: 'Face to camera', value: 'face' },
   { label: 'Over b-roll', value: 'broll' },
   { label: 'On screen (text, not filmed)', value: 'screen' },
   { label: 'Voice note', value: 'voice_note' }
 ]
+const showItemsFor = (beat: string) => isStandalone.value && (beat === HOOK || beat === CTA) ? showItems.filter(item => item.value !== 'broll') : showItems
 const beatTitle = (beat: string) => isStandalone.value && beat === HOOK ? 'hook (opens the video)' : isStandalone.value && beat === CTA ? 'cta (closes the video)' : beat
 
 const canSave = computed(() =>
@@ -166,7 +170,7 @@ async function save() {
         <UFormField
           v-if="form.beats.length"
           label="Each beat"
-          help="What to write in it and an example line (both shown when writing a VO, and given to your AI when it's connected), its default layout (face to camera or over b-roll; treatments can add other versions), and the b-roll shots to suggest for it on a shoot."
+          help="What to write in it and an example line (both shown when writing a VO, and given to your AI when it's connected), its default layout (face to camera or over b-roll; a hook or CTA is never over b-roll; the Face to camera treatment adds a version), and the b-roll shots to suggest for it on a shoot."
         >
           <div class="space-y-3">
             <div v-for="beat in form.beats" :key="beat" class="space-y-2 rounded-lg border border-default p-3">
@@ -174,7 +178,7 @@ async function save() {
                 <UBadge :label="beatTitle(beat)" color="neutral" variant="subtle" />
                 <USelect
                   :model-value="showOf(beat)"
-                  :items="showItems"
+                  :items="showItemsFor(beat)"
                   size="xs"
                   class="w-56"
                   @update:model-value="form.beat_display[beat] = $event as BeatShow"
