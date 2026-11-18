@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ShootBundle } from '../shared/utils/shootsheet'
 import {
   brollChannelIds,
+  brollShortfalls,
   clipSpotInfo,
   brollFolder,
   buildCsv,
@@ -276,6 +277,27 @@ describe('brollChannelIds', () => {
     expect(brollChannelIds({ channels, items }, { ...general, channel_id: null, feature })).toEqual(['c2'])
     expect(brollChannelIds({ channels, items }, { ...general, channel_id: 'c1', feature })).toEqual([])
     expect(brollChannelIds({ channels, items: [vo('c1', 'calm')] }, { ...general, channel_id: null, feature })).toEqual([])
+  })
+})
+
+describe('brollShortfalls', () => {
+  // 2.5 words a second: ten words is 4s
+  const words = (n: number) => Array.from({ length: n }, () => 'word').join(' ')
+  const vo = {
+    kind: 'body', status: 'planned', code: 'V01', channel_id: 'c1', feature_slug: null, script_override: null,
+    format: { kind: 'standalone', beats: ['hook', 'problem', 'product', 'cta'], beat_display: {} },
+    script_snapshot: [{ beat: 'hook', script: words(10) }, { beat: 'problem', script: words(10) }, { beat: 'product', script: words(15) }, { beat: 'cta', script: words(10) }]
+  }
+  const shot = (beat: string, format_id: string | null, n = 1) => Array.from({ length: n }, () => ({ channel_id: 'c1', format_id, beat, description: '', status: 'planned', feature: null }))
+  const bundle = (broll: unknown[]) => ({ shoot: { broll_variations: 1 }, channels: [{ id: 'c1', name: 'wellbymak' }], items: [vo], broll }) as unknown as Parameters<typeof brollShortfalls>[0]
+
+  it('warns when a VO’s b-roll beyond its beats’ own shots needs more than the product shots give', () => {
+    // problem 4s: 3 own shots (5.4s). product 6s: none of its own, so 6s from 2 product shots (3.6s)
+    const [warning] = brollShortfalls(bundle([...shot('problem', 'f1', 3), ...shot('product', null, 2)]), 2.5)
+    expect(warning).toBe('V01 (wellbymak): its product beat needs about 6s of b-roll beyond their own shots, but the 2 product shots give about 4s, so clips will repeat. Plan more shots for that beat, or more product shots.')
+  })
+  it('says nothing when there’s enough, and ignores hook and CTA beats (never over b-roll)', () => {
+    expect(brollShortfalls(bundle([...shot('problem', 'f1', 3), ...shot('product', null, 4)]), 2.5)).toEqual([])
   })
 })
 

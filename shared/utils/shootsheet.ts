@@ -1,7 +1,7 @@
 // Shoot codes, folder paths and the export builders (spec §10). Pure: shared by the
 // builder, the shot sheet and the Nitro export routes.
 import type { Beat, SlotContext } from './slots'
-import { beatWordings, buildSlotContext, channelSlotsIn, joinBeats, parseBeats, parseTakeKey, renderBeats, renderScript, slugify, takeKey } from './slots'
+import { beatWordings, buildSlotContext, channelSlotsIn, estimateSeconds, joinBeats, parseBeats, parseTakeKey, renderBeats, renderScript, slugify, takeKey } from './slots'
 import { parseSlotValues } from './orgProfile'
 import type { ItemKind } from './calculator'
 import { isDrawable, planHash } from './klip'
@@ -559,6 +559,52 @@ export function brollChannelIds(
     && (!feature || item.feature_slug === feature)
     && (!shot.format_id || !!item.format?.beats.includes(shot.beat))
     && (channelId === null || item.channel_id === channelId)))
+}
+
+/** About how long one b-roll clip runs, for planning (shots are asked for at under 2s). */
+export const BROLL_CLIP_SECONDS = 1.8
+
+/**
+ * Planner warnings: VOs whose b-roll would have to repeat clips. Each VO beat shown over b-roll is
+ * covered by its own shots (that beat, on that channel, generic or for the VO's feature) and then
+ * the general product shots, a clip about BROLL_CLIP_SECONDS long (each shot filmed `broll_variations`
+ * times per channel). Repeating a clip is the last resort; this says where it would happen, from
+ * each beat's script length at the speech pace.
+ */
+export function brollShortfalls(
+  bundle: Pick<ShootBundle, 'shoot' | 'items' | 'broll' | 'channels'>,
+  wordsPerSecond: number
+): string[] {
+  const clipsPerShot = Math.max(1, Number(bundle.shoot.broll_variations) || 1)
+  const seconds = (shots: number) => shots * clipsPerShot * BROLL_CLIP_SECONDS
+  const round = (value: number) => Math.round(value)
+  const warnings: string[] = []
+  const seen = new Set<string>()
+  for (const item of bundle.items) {
+    if (item.kind !== 'body' || item.status === 'skipped' || !item.channel_id) continue
+    const key = `${item.code}|${item.channel_id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const shots = bundle.broll.filter(shot => shot.status !== 'skipped'
+      && (!shot.feature || shot.feature.slug === (item.feature_slug ?? null))
+      && brollChannelIds(bundle, shot).includes(item.channel_id))
+    const general = shots.filter(shot => !shot.format_id).length
+    const short: { beat: string, need: number }[] = []
+    for (const beat of parseBeats(item.script_override ?? item.script_snapshot)) {
+      if (beatShow(item.format, beat.beat) !== 'broll') continue
+      const length = estimateSeconds(beat.script, wordsPerSecond)
+      const own = seconds(shots.filter(shot => shot.format_id && slugify(shot.beat) === slugify(beat.beat)).length)
+      if (length > own) short.push({ beat: beat.beat, need: length - own })
+    }
+    const need = short.reduce((total, entry) => total + entry.need, 0)
+    const have = seconds(general)
+    if (!short.length || need <= have) continue
+    const channel = bundle.channels.find(entry => entry.id === item.channel_id)?.name ?? ''
+    const beats = short.map(entry => entry.beat)
+    const named = beats.length > 1 ? `${beats.slice(0, -1).join(', ')} and ${beats.at(-1)}` : beats[0]
+    warnings.push(`${item.code}${channel ? ` (${channel})` : ''}: its ${named} beat${beats.length > 1 ? 's need' : ' needs'} about ${round(need)}s of b-roll beyond their own shots, but ${general ? `the ${general} product shot${general === 1 ? '' : 's'} give about ${round(have)}s` : 'there are no product shots'}, so clips will repeat. Plan more shots for ${beats.length > 1 ? 'those beats' : 'that beat'}, or more product shots.`)
+  }
+  return warnings
 }
 
 /**

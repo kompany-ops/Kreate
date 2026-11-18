@@ -3,7 +3,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import type { Row, Update } from '#shared/types/models'
 import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { BundleItem, ShotGroup } from '#shared/utils/shootsheet'
-import { brollChannelIds } from '#shared/utils/shootsheet'
+import { brollChannelIds, brollShortfalls } from '#shared/utils/shootsheet'
 import type { Beat } from '#shared/utils/slots'
 import type { EditsCheck } from '#shared/utils/manifest'
 import { wordingMixesAvailable } from '#shared/utils/recipes'
@@ -476,7 +476,14 @@ const shootFormats = computed<BrollFormat[]>(() => {
 })
 
 // --- calculator ------------------------------------------------------------
-const result = computed(() => calculate(bundleToCalcInput(bundle.value, toCalcSettings(settings.value, DEFAULT_CALC_SETTINGS))))
+const result = computed(() => {
+  const calc = calculate(bundleToCalcInput(bundle.value, toCalcSettings(settings.value, DEFAULT_CALC_SETTINGS)))
+  // and where a VO's b-roll would have to repeat clips (until filming ends: then the recipes say)
+  const repeats = ['draft', 'planned', 'shooting'].includes(shoot.value.status)
+    ? brollShortfalls(bundle.value, Number(settings.value?.words_per_second) || DEFAULT_WORDS_PER_SECOND)
+    : []
+  return { ...calc, warnings: [...calc.warnings, ...repeats] }
+})
 const unfilled = computed(() => unfilledItems(bundle.value))
 const calculatorOpen = ref(false)
 /** the Treatments card on General starts collapsed */

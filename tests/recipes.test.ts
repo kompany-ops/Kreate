@@ -45,7 +45,7 @@ describe('buildRecipes', () => {
     expect(recipes[0]!.id).toMatch(/^S001_nix_joe_H01_V01_C01_[0-9a-f]{8}$/)
   })
 
-  it('covers each beat by length from its own clips, and never repeats a clip', () => {
+  it('covers each beat by length from its own clips, fresh clips before any repeat', () => {
     const [recipe] = buildRecipes(manifest([
       take('hook', 'H01', 'joe', 'nix'),
       ...vo('V01', 'joe', 'nix', [['problem', 5], ['product', 3]]),
@@ -72,9 +72,27 @@ describe('buildRecipes', () => {
     expect(recipe!.vo.beats[0]!.broll.at(-1)).toBe('nix/b-roll/general/g1.mp4')
   })
 
-  it('drops a recipe whose b-roll can\'t cover a beat', () => {
+  it('repeats a clip only as a last resort, later in the video and never back to back', () => {
+    const [recipe] = buildRecipes(manifest([
+      take('hook', 'H01', 'joe', 'nix'),
+      ...vo('V01', 'joe', 'nix', [['problem', 9], ['product', 3]]),
+      take('cta', 'C01', 'joe', 'nix'),
+      clip('nix', 'problem', 'p1', 2), clip('nix', 'problem', 'p2', 2), clip('nix', 'general', 'g1', 3)
+    ]))
+    expect(recipe).toBeDefined()
+    const all = recipe!.vo.beats.flatMap(beat => beat.broll)
+    // every clip (the beat's own, then the product shot) once before any comes back
+    expect(new Set(all.slice(0, 3)).size).toBe(3)
+    expect(all[2]).toBe('nix/b-roll/general/g1.mp4')
+    expect(all).toHaveLength(5)
+    // never the same clip twice in a row, across beats too
+    all.slice(1).forEach((file, index) => expect(file).not.toBe(all[index]))
+  })
+
+  it('drops a recipe whose beat could only be covered by a clip back to back', () => {
     expect(buildRecipes(manifest([
-      take('hook', 'H01', 'joe', 'nix'), ...vo('V01', 'joe', 'nix', [['problem', 30]]), take('cta', 'C01', 'joe', 'nix'), ...nixBroll
+      take('hook', 'H01', 'joe', 'nix'), ...vo('V01', 'joe', 'nix', [['problem', 5]]), take('cta', 'C01', 'joe', 'nix'),
+      clip('nix', 'problem', 'p1', 2)
     ]))).toEqual([])
   })
 

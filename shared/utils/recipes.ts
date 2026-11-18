@@ -14,7 +14,8 @@
 // Each beat is shown as the speaker on camera (face: no b-roll) or their voice over b-roll. A
 // b-roll beat is covered by b-roll from that channel, filed under that beat, added clip by clip
 // until their combined length covers the beat (never looped or slowed), topped up with general
-// product shots only when the beat's own clips run short. No clip repeats within one video. A VO
+// product shots only when the beat's own clips run short. Fresh clips first; a clip can come back
+// later in the video, but never straight after itself. A VO
 // CTA plays over b-roll too: product shots first. The stitcher trims. Each version + hook + CTA
 // gets up to `broll_variations` different b-roll selections, each its own recipe.
 // B-roll filed for a product feature (b-roll/<beat>/<feature>/) only goes under VOs about that
@@ -144,23 +145,40 @@ export function hash(text: string): number {
 }
 const shortHash = (text: string) => hash(text).toString(16).padStart(8, '0')
 
+/** The b-roll one video has played so far: how often each clip, and the clip just before (null after a beat with none). */
+export interface BrollState {
+  uses: Map<string, number>
+  last: string | null
+}
+
 /**
- * Fill `duration` seconds from `own` (the beat's clips) then `extra` (product shots), clip by clip
- * in a fixed order for this recipe, skipping clips already used in the video. Null when it can't
- * be covered.
+ * Fill `duration` seconds from `own` (the beat's clips) then `extra` (product shots), clip by clip.
+ * Each pick is the clip used least in the video so far (fresh clips first), the beat's own before
+ * product shots, then a fixed order for this recipe. A clip can come back later in the video, but
+ * never straight after itself. Null when it can't be covered (no clip but the one just played).
  */
-function fill(duration: number, own: BrollClip[], extra: BrollClip[], used: Set<string>, seed: string): string[] | null {
+function fill(duration: number, own: BrollClip[], extra: BrollClip[], state: BrollState, seed: string): string[] | null {
   const order = (clips: BrollClip[]) => [...clips].sort((a, b) => hash(`${seed}|${a.file}`) - hash(`${seed}|${b.file}`))
-  const candidates = [...order(own), ...order(extra)].filter(clip => !used.has(clip.file) && (clip.duration ?? 0) > 0)
+  const files = new Set<string>()
+  const pool = [...order(own), ...order(extra)].filter(clip => (clip.duration ?? 0) > 0 && !files.has(clip.file) && !!files.add(clip.file))
+  const uses = new Map(state.uses)
   const picks: BrollClip[] = []
   let covered = 0
-  for (const clip of candidates) {
-    if (covered >= duration) break
-    picks.push(clip)
-    covered += clip.duration!
+  let previous = state.last
+  while (covered < duration) {
+    let best: BrollClip | null = null
+    for (const clip of pool) {
+      if (clip.file === previous) continue
+      if (!best || (uses.get(clip.file) ?? 0) < (uses.get(best.file) ?? 0)) best = clip
+    }
+    if (!best) return null
+    picks.push(best)
+    covered += best.duration!
+    uses.set(best.file, (uses.get(best.file) ?? 0) + 1)
+    previous = best.file
   }
-  if (covered < duration) return null
-  for (const clip of picks) used.add(clip.file)
+  state.uses = uses
+  state.last = previous
   return picks.map(clip => clip.file)
 }
 
@@ -320,8 +338,8 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
             for (let variation = 0; variation < brollVariations; variation++) {
               // the first selection keeps the seed recipes always had, so their IDs don't change
               const seed = variation ? `${base}|v${variation}` : base
-              const used = new Set<string>()
-              const cover = (take: TakeClip, own: BrollClip[], extra: BrollClip[], key: string) => fill(take.duration!, own, extra, used, `${seed}|${key}`)
+              const played: BrollState = { uses: new Map(), last: null }
+              const cover = (take: TakeClip, own: BrollClip[], extra: BrollClip[], key: string) => fill(take.duration!, own, extra, played, `${seed}|${key}`)
               const sectionOf = (name: string) => channelBroll.filter(clip => clip.section === slugify(name))
 
               // a standalone hook shown over b-roll is covered like a beat
@@ -335,6 +353,8 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
               let valid = true
               for (const beat of body) {
                 let files: string[] = []
+                // a beat without b-roll sits between: what came before it isn't back to back with what follows
+                if (showOf(beat) !== 'broll') played.last = null
                 if (showOf(beat) === 'broll') {
                   // general product shots top a beat up only when its own clips run short
                   const picked = cover(beat, sectionOf(beat.beat ?? ''), productShots, beat.beat ?? '')
