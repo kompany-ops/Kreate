@@ -712,10 +712,10 @@ export function registerShootTools(kit: ShootToolKit) {
   // --- status ---------------------------------------------------------------------------------------
   server.registerTool('set_shoot_status', {
     title: 'Set shoot status',
-    description: 'Move a shoot along (the team only): "planned" freezes a ready draft\'s scripts (get_shoot\'s to_plan must be empty); "draft" takes a planned shoot (not yet started) back to editing; "stale" archives a shoot from the shoots list, "not_stale" brings it back. Filming, uploads, editing and going live happen in Kreate and Klip. Confirm with the person first.',
-    inputSchema: z.object({ shoot: shootArg, status: z.enum(['planned', 'draft', 'stale', 'not_stale']), organisation: organisationArg }),
+    description: 'Move a shoot along (the team only): "planned" freezes a ready draft\'s scripts (get_shoot\'s to_plan must be empty); "draft" takes a planned shoot (not yet started) back to editing; "shooting" starts filming a planned shoot, or resumes a filmed one; "filmed" ends filming (Dropbox must be connected: the clips then upload from each phone); "stale" archives a shoot from the shoots list, "not_stale" brings it back. Uploads, editing, going Live and making batches happen in Kreate and Klip. Confirm with the person first, and before ending say how many shots are still to film (get_shoot).',
+    inputSchema: z.object({ shoot: shootArg, status: z.enum(['planned', 'draft', 'shooting', 'filmed', 'stale', 'not_stale']), organisation: organisationArg }),
     annotations: { readOnlyHint: false, destructiveHint: false }
-  }, guarded(async ({ shoot: code, status }: { shoot: string, status: 'planned' | 'draft' | 'stale' | 'not_stale', organisation?: string }, org, db) => {
+  }, guarded(async ({ shoot: code, status }: { shoot: string, status: 'planned' | 'draft' | 'shooting' | 'filmed' | 'stale' | 'not_stale', organisation?: string }, org, db) => {
     if (!isTeamRole(org.role)) return failure('Only the team can change a shoot\'s status.')
     const bundle = await loadShoot(db, code)
     const { shoot } = bundle
@@ -725,6 +725,12 @@ export function registerShootTools(kit: ShootToolKit) {
     } else if (status === 'draft') {
       if (shoot.status !== 'planned') return failure(`Only a planned shoot that hasn't started goes back to draft; ${shoot.code} is ${STATUS_WORDS[shoot.status] ?? shoot.status}.`)
       check(await db.from('shoots').update({ status: 'draft' }).eq('id', shoot.id).eq('status', 'planned'))
+    } else if (status === 'shooting') {
+      if (shoot.status !== 'planned' && shoot.status !== 'filmed') return failure(`Only a planned shoot starts filming, or a filmed one resumes; ${shoot.code} is ${STATUS_WORDS[shoot.status] ?? shoot.status}.`)
+      check(await db.from('shoots').update({ status: 'shooting' }).eq('id', shoot.id).eq('status', shoot.status))
+    } else if (status === 'filmed') {
+      if (shoot.status !== 'shooting') return failure(`Only a shoot being filmed can end; ${shoot.code} is ${STATUS_WORDS[shoot.status] ?? shoot.status}.`)
+      check(await db.from('shoots').update({ status: 'filmed' }).eq('id', shoot.id).eq('status', 'shooting'))
     } else {
       const { data: claims } = await db.auth.getClaims()
       const stale = status === 'stale'
@@ -735,6 +741,8 @@ export function registerShootTools(kit: ShootToolKit) {
       organisation: org.name,
       now: status,
       ...(status === 'planned' ? { next: 'Its exports are ready in Kreate. Open the shoot and use Export → Create folders in Dropbox if its Dropbox folders aren\'t made yet.' } : {}),
+      ...(status === 'shooting' || status === 'filmed' ? { still_to_film: [...bundle.items, ...bundle.broll].filter(entry => entry.status === 'planned').length } : {}),
+      ...(status === 'filmed' ? { next: 'Clips upload to Dropbox from each phone. Then the team sends it for editing in Kreate.' } : {}),
       link: link(paths.shoot(shoot.code))
     })
   }))
