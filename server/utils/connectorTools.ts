@@ -7,7 +7,8 @@ import type { PayAmounts, PayType } from '#shared/utils/brandDeal'
 // The AI connector's tools (spec §11). Each request gets a fresh server, acting as the person whose
 // token it is. Every tool works in one organisation: the one it names (`organisation`), from those
 // the person allowed this AI app when connecting it; the database keeps each query inside it.
-// Library writes land tagged `ai-draft` for a person to review. Shoot tools (connectorShootTools) change
+// New hooks and CTAs land tagged `ai-draft` for a person to review. Library tools (connectorLibraryTools)
+// change formats, hooks, CTAs and products the way the Library and brand pages do. Shoot tools (connectorShootTools) change
 // plans the way the shoot page does. Nothing here bills; archiving a brand hides it (restorable).
 
 const DRAFT_TAG = 'ai-draft'
@@ -24,7 +25,7 @@ Write lines the way a real creator talks to camera: first person, plain spoken w
 
 What you add (add_hooks, add_ctas) goes into the Library tagged "${DRAFT_TAG}" for a person to review in Kreate, and the organisation's chat gets a note that you added it.
 
-You can plan shoots end to end like a person in Kreate: change a shoot's setup, people, channels, formats and custom slots (update_shoot), put hooks, VOs and CTAs on its shot list or take them off (add_to_shot_list, remove_from_shot_list), change their wording and locations (edit_shot_list), write and change VOs (add_vo, update_vo), build its b-roll list (add_broll, update_broll, remove_broll) and move it to planned (set_shoot_status, the team only). get_shoot shows everything, including what still stops a draft being planned. Ask before removing things or changing status. You can also search the Library (search_library), draft a shoot (draft_shoot) add and change brands (add_brand, update_brand: everything on the brand page, including how it pays us, its star and archiving) and add products and product features (add_product, add_features). VOs and shoots you make are drafts a person reviews in Kreate.
+You can plan shoots end to end like a person in Kreate: change a shoot's setup, people, channels, formats and custom slots (update_shoot), put hooks, VOs and CTAs on its shot list or take them off (add_to_shot_list, remove_from_shot_list), change their wording and locations (edit_shot_list), write and change VOs (add_vo, update_vo), build its b-roll list (add_broll, update_broll, remove_broll) and move it to planned (set_shoot_status, the team only). get_shoot shows everything, including what still stops a draft being planned. Ask before removing things or changing status. You can also search the Library (search_library), change or archive hooks and CTAs (update_hooks, update_ctas), add and change formats (add_format, update_format), draft a shoot (draft_shoot), add and change brands (add_brand, update_brand: everything on the brand page, including how it pays us, its star and archiving), and add and change products and their features (add_product, add_features, update_product). A partner brand's items are theirs and can't be changed. VOs and shoots you make are drafts a person reviews in Kreate.
 
 Everything has its own link (the \`link\` field): give it to the person whenever you mention or make something, and use share_to_chat to post an item to the chat as a card.
 
@@ -479,6 +480,7 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
   }))
 
   registerShootTools({ server, guarded, text, failure, link, paths, pace, organisationArg })
+  registerLibraryTools({ server, guarded, text, failure, link, paths, pace, organisationArg })
 
   // --- brands, products, features ------------------------------------------------------------------
   /** a slug that isn't taken yet in this table (name, name-2, name-3…) */
