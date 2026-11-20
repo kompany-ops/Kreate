@@ -130,6 +130,8 @@ export function registerShootTools(kit: ShootToolKit) {
         notes: shoot.notes
       },
       custom_slots: parseSlotValues(shoot.slot_values),
+      // every treatment (the same for every account) and whether this shoot has it on
+      treatments: bundle.treatmentChoices.map(choice => ({ name: choice.name, on: !choice.off })),
       people: bundle.people.map(person => person.name),
       channels: bundle.channels.map(channel => ({
         name: channel.name,
@@ -184,7 +186,7 @@ export function registerShootTools(kit: ShootToolKit) {
   // --- setup ----------------------------------------------------------------------------------------
   server.registerTool('update_shoot', {
     title: 'Update shoot',
-    description: 'Change a shoot\'s setup: product, date, people, channels, formats, custom slot values, batch size, target per channel, b-roll variations, cast and wording mixes, kit, location notes and notes. Only what you pass changes. While it\'s a draft everything can change; once planned, only batch size, target, kit and notes. Taking people, channels or formats off takes their lines (and a format\'s VOs and b-roll) off the shot list.',
+    description: 'Change a shoot\'s setup: product, date, people, channels, formats, custom slot values, batch size, target per channel, b-roll variations, cast and wording mixes, kit, location notes, notes and which treatments it has on. Only what you pass changes. While it\'s a draft everything can change; once planned, only batch size, target, kit, notes and treatments (until it goes to editing). Taking people, channels or formats off takes their lines (and a format\'s VOs and b-roll) off the shot list.',
     inputSchema: z.object({
       shoot: shootArg,
       product_id: z.string().uuid().optional().describe('Another product (from list_brands). Only while it has no VOs.'),
@@ -202,13 +204,15 @@ export function registerShootTools(kit: ShootToolKit) {
       kit: z.enum(['audition', 'scale', 'custom']).optional(),
       location_notes: z.string().max(2000).nullable().optional(),
       notes: z.string().max(4000).nullable().optional(),
+      treatments: z.record(z.string().max(120), z.boolean()).optional().describe('Treatments to switch on (true) or off (false) for this shoot, by name (list_treatments), e.g. {"Search bar": false}. Others stay as they are.'),
       organisation: organisationArg
     }),
     annotations: { readOnlyHint: false, destructiveHint: true }
   }, guarded(async (input: {
     shoot: string, product_id?: string, date?: string | null, people?: string[], channels?: string[], add_formats?: string[], remove_formats?: string[],
     custom_slots?: Record<string, string | null>, batch_size_pct?: number, target_per_channel?: number, broll_variations?: number,
-    cast_mixes?: number, wording_mixes?: number, kit?: string, location_notes?: string | null, notes?: string | null, organisation?: string
+    cast_mixes?: number, wording_mixes?: number, kit?: string, location_notes?: string | null, notes?: string | null,
+    treatments?: Record<string, boolean>, organisation?: string
   }, org, db) => {
     let bundle = await loadShoot(db, input.shoot)
     requireNotLive(bundle)
@@ -234,6 +238,16 @@ export function registerShootTools(kit: ShootToolKit) {
     if (input.kit !== undefined) patch.kit = input.kit
     if (input.location_notes !== undefined) patch.location_notes = input.location_notes?.trim() || null
     if (input.notes !== undefined) patch.notes = input.notes?.trim() || null
+    if (input.treatments && Object.keys(input.treatments).length) {
+      const off = new Set(bundle.shoot.treatments_off)
+      for (const [name, on] of Object.entries(input.treatments)) {
+        const choice = bundle.treatmentChoices.find(entry => same(entry.name, name))
+        if (!choice) throw new Error(`There's no treatment "${name}" (list_treatments).`)
+        if (on) off.delete(choice.id)
+        else off.add(choice.id)
+      }
+      patch.treatments_off = [...off]
+    }
     if (input.custom_slots) {
       const values = { ...parseSlotValues(bundle.shoot.slot_values) } as Record<string, string>
       for (const [name, value] of Object.entries(input.custom_slots)) {

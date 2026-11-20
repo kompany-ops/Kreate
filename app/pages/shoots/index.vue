@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Row } from '#shared/types/models'
-import type { BundleItem, BundleTreatment } from '#shared/utils/shootsheet'
+import type { BundleItem } from '#shared/utils/shootsheet'
 import type { ItemRow } from '#shared/utils/loadShoot'
 
 type ShootRow = Row<'shoots'> & {
@@ -16,7 +16,7 @@ const { access, isCast } = useAccess()
 
 const shoots = ref<ShootRow[]>([])
 const itemsByShoot = ref<Record<string, BundleItem[]>>({})
-const treatments = ref<BundleTreatment[]>([])
+const treatments = ref<Awaited<ReturnType<typeof loadTreatmentRows>>>([])
 
 async function loadShoots() {
   shoots.value = must(await db
@@ -42,8 +42,8 @@ async function loadShoots() {
     if (page.length < 1000) break
   }
   itemsByShoot.value = grouped
-  // the Library's treatments that are on (combinations with their parts), as the shoot page loads them
-  treatments.value = await loadTreatments(db)
+  // the treatments (one set for everyone); each shoot leaves out the ones it has off, as the shoot page does
+  treatments.value = await loadTreatmentRows(db)
 }
 await load()
 await loadShoots()
@@ -58,7 +58,7 @@ function estimate(shoot: ShootRow) {
     channels: shoot.shoot_channels.map(row => row.channel),
     items: itemsByShoot.value[shoot.id] ?? [],
     broll: [],
-    treatments: treatments.value,
+    treatments: treatmentsFrom(treatments.value, shoot.treatments_off),
     channelSlots: parseChannelSlots(settings.value?.channel_slots).map(slot => slot.name)
   }, calcSettings.value)).totals
 }

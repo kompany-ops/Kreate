@@ -511,6 +511,14 @@ const unfilled = computed(() => unfilledItems(bundle.value))
 const calculatorOpen = ref(false)
 /** the Treatments card on General starts collapsed */
 const treatmentsOpen = ref(false)
+/** once it's gone to editing, Klip's manifest holds the treatments it was given */
+const treatmentsLocked = computed(() => shoot.value.status === 'editing' || shoot.value.status === 'edited')
+const treatmentResult = (name: string) => result.value.treatments.find(treatment => treatment.name === name)
+/** switch a treatment on or off for this shoot (new treatments are on everywhere) */
+async function setTreatment(id: string, on: boolean) {
+  const off = shoot.value.treatments_off.filter(other => other !== id)
+  await patchShoot({ treatments_off: on ? off : [...off, id] })
+}
 
 // --- status ----------------------------------------------------------------
 const blockers = computed(() => planBlockers(bundle.value))
@@ -936,8 +944,8 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
             </template>
           </UAlert>
 
-          <!-- treatments that are on (Library → Treatments): what each adds to this shoot's recipes -->
-          <UCard v-if="result.treatments.length" :ui="{ body: treatmentsOpen ? undefined : 'hidden' }">
+          <!-- every treatment (one set for everyone), each switchable for this shoot until it goes to editing -->
+          <UCard v-if="bundle.treatmentChoices.length" :ui="{ body: treatmentsOpen ? undefined : 'hidden' }">
             <template #header>
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <button
@@ -951,7 +959,7 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
                     Treatments
                   </h2>
                   <UBadge
-                    :label="`${result.treatments.filter(treatment => treatment.recipes).length} of ${result.treatments.length} applied`"
+                    :label="`${result.treatments.filter(treatment => treatment.recipes).length} of ${bundle.treatmentChoices.length} applied`"
                     color="neutral"
                     variant="subtle"
                     size="sm"
@@ -961,13 +969,25 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
               </div>
             </template>
             <p class="mb-3 text-sm text-muted">
-              Every recipe also gets a version for each treatment that applies to it. Klip makes a treated copy of each clip it applies to, and Showdog stitches them.
+              Every recipe also gets a version for each treatment that's on and applies to it. Switch off any this shoot shouldn't have.
+              <template v-if="treatmentsLocked">
+                It's gone to editing, so these are the ones Klip was given.
+              </template>
             </p>
             <ul class="divide-y divide-default">
-              <li v-for="treatment in result.treatments" :key="treatment.name" class="flex items-baseline justify-between gap-3 py-1.5 text-sm">
-                <span class="text-highlighted">{{ treatment.name }}</span>
-                <span v-if="treatment.recipes" class="text-primary tabular-nums">+{{ formatNumber(treatment.recipes) }} recipes</span>
-                <span v-else class="text-right text-xs text-muted">Not applied: {{ treatment.why }}</span>
+              <li v-for="choice in bundle.treatmentChoices" :key="choice.id" class="flex items-center justify-between gap-3 py-1.5 text-sm">
+                <span class="min-w-0" :class="choice.off ? 'text-muted' : 'text-highlighted'" :title="choice.description ?? undefined">{{ choice.name }}</span>
+                <span class="ml-auto flex items-center gap-3">
+                  <span v-if="choice.off" class="text-xs text-muted">Off for this shoot</span>
+                  <span v-else-if="treatmentResult(choice.name)?.recipes" class="text-primary tabular-nums">+{{ formatNumber(treatmentResult(choice.name)!.recipes) }} recipes</span>
+                  <span v-else class="text-right text-xs text-muted">Not applied: {{ treatmentResult(choice.name)?.why ?? 'not in what Klip was given' }}</span>
+                  <USwitch
+                    :model-value="!choice.off"
+                    :disabled="treatmentsLocked"
+                    :aria-label="choice.off ? `Switch ${choice.name} on for this shoot` : `Switch ${choice.name} off for this shoot`"
+                    @update:model-value="setTreatment(choice.id, $event)"
+                  />
+                </span>
               </li>
             </ul>
           </UCard>

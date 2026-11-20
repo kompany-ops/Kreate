@@ -18,7 +18,11 @@ export interface LoadedShoot extends ShootBundle {
   broll: BrollShot[]
   /** formats added to the plan by hand (VO formats are included separately, from the items) */
   plannedFormats: PlannedFormat[]
+  /** every treatment a shoot can use, with whether this one has it off (shoots.treatments_off) */
+  treatmentChoices: TreatmentChoice[]
 }
+
+export interface TreatmentChoice { id: string, name: string, description: string | null, off: boolean }
 
 /** A b-roll shot with the product feature it's for (null = generic b-roll). */
 export type BrollShot = Row<'broll_shots'> & { feature: { slug: string, name: string } | null }
@@ -118,7 +122,7 @@ export async function loadShootBundle(db: SupabaseClient<Database>, code: string
     db.from('broll_shots').select('*, feature:product_features(slug, name)').eq('shoot_id', shoot.id).order('sort_order').order('created_at'),
     db.from('person_channels').select('person_id, channel_id'),
     db.from('shoot_formats').select('format:formats(id, code, name, description, beats, beat_descriptions, beat_examples, beat_broll, kind, beat_display, source_url)').eq('shoot_id', shoot.id),
-    loadTreatments(db),
+    loadTreatmentRows(db),
     db.from('settings').select('channel_slots').limit(1).maybeSingle()
   ])
 
@@ -135,7 +139,8 @@ export async function loadShootBundle(db: SupabaseClient<Database>, code: string
     broll: unwrap(broll) as BrollShot[],
     channelPeople: channelPeopleFor(peopleRows, channelRows, unwrap(links)),
     plannedFormats: unwrap(planned).map(row => row.format as unknown as PlannedFormat).filter(Boolean),
-    treatments,
+    treatments: treatmentsFrom(treatments, shoot.treatments_off),
+    treatmentChoices: treatments.filter(row => row.active).map(row => ({ id: row.id, name: row.name, description: row.description, off: shoot.treatments_off.includes(row.id) })),
     channelSlots: parseChannelSlots(unwrap(settings)?.channel_slots).map(slot => slot.name)
   }
 }
@@ -153,22 +158,26 @@ export function channelPeopleFor(
   ]))
 }
 
-/** Calculator input for a loaded shoot. */
-/**
- * The Library's treatments that are on, each combination with its parts (a part can itself be
- * switched off and still be part of a combination). Every recipe gets a version for each that
- * applies. Used by the shoot page and the shoots list.
- */
-export async function loadTreatments(db: SupabaseClient<Database>): Promise<BundleTreatment[]> {
-  const rows = unwrap(await db.from('treatments').select('id, name, description, kind, placement, needs, component, settings, parts, active')
+/** The treatments every account has (one shared set, archived ones left out), in order. */
+export async function loadTreatmentRows(db: SupabaseClient<Database>) {
+  return unwrap(await db.from('treatments').select('id, name, description, kind, placement, needs, component, settings, parts, active')
     .eq('archived', false).order('sort_order'))
+}
+type TreatmentRow = Awaited<ReturnType<typeof loadTreatmentRows>>[number]
+
+/**
+ * The treatments that are on for a shoot (on, and not switched off for it: `off`), each
+ * combination with its parts (a part can itself be switched off and still be part of a
+ * combination). Every recipe gets a version for each that applies.
+ */
+export function treatmentsFrom(rows: TreatmentRow[], off: string[] = []): BundleTreatment[] {
   const byId = new Map(rows.map(row => [row.id, row]))
-  const spec = (row: typeof rows[number]): BundleTreatment => ({
+  const spec = (row: TreatmentRow): BundleTreatment => ({
     name: row.name, description: row.description, kind: row.kind, placement: row.placement, needs: row.needs, component: row.component, settings: row.settings
   })
-  return rows.filter(row => row.active).map(row => ({
+  return rows.filter(row => row.active && !off.includes(row.id)).map(row => ({
     ...spec(row),
-    parts: row.parts.map(id => byId.get(id)).filter((part): part is typeof rows[number] => !!part).map(spec)
+    parts: row.parts.map(id => byId.get(id)).filter((part): part is TreatmentRow => !!part).map(spec)
   }))
 }
 

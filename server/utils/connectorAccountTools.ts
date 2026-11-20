@@ -1,6 +1,5 @@
 import * as z from 'zod/v4'
-import type { Json } from '#shared/types/database.types'
-import type { Insert, Update } from '#shared/types/models'
+import type { Update } from '#shared/types/models'
 import type { Manifest } from '#shared/utils/manifest'
 import type { ShootToolKit } from './connectorShootTools'
 
@@ -23,10 +22,6 @@ const slotName = (text: string) => text.trim().toLowerCase().replace(/[^a-z0-9_]
 const teamOnly = (role: string, what: string) => {
   if (!isTeamRole(role)) throw new Error(`Only the team can change ${what}.`)
 }
-
-const TREATMENT_KINDS = ['layout', 'overlay', 'footage'] as const
-const PLACEMENTS = ['hook', 'video', 'cta'] as const
-const NEEDS = ['text', 'speaker_video', 'old_footage', 'offer'] as const
 
 export function registerAccountTools(kit: AccountToolKit) {
   const { server, guarded, text, failure, link, paths, organisationArg } = kit
@@ -158,13 +153,12 @@ export function registerAccountTools(kit: AccountToolKit) {
   // --- treatments ----------------------------------------------------------------------------------
   server.registerTool('list_treatments', {
     title: 'List treatments',
-    description: 'The treatments: ways a finished recipe is presented (layouts, overlays such as a search bar, footage such as greenscreen), and combinations of them. Every active one makes its own version of each recipe that has what it needs. Built-in ones are always on.',
-    inputSchema: z.object({ archived: z.boolean().optional().describe('true: include archived ones'), organisation: organisationArg }),
+    description: 'The treatments: ways a finished recipe is presented (layouts, overlays such as a search bar, footage such as greenscreen), and combinations of them. Every account has the same set, changed by Kreate only. Each one makes its own version of every recipe that has what it needs, unless a shoot switches it off (update_shoot treatments_off, until the shoot goes to editing).',
+    inputSchema: z.object({ organisation: organisationArg }),
     annotations: { readOnlyHint: true }
-  }, guarded(async ({ archived }: { archived?: boolean, organisation?: string }, org, db) => {
-    let query = db.from('treatments').select('id, name, description, kind, placement, needs, component, settings, parts, active, archived, system, sort_order').order('sort_order')
-    if (!archived) query = query.eq('archived', false)
-    const rows = check(await query) ?? []
+  }, guarded(async (_input: { organisation?: string }, org, db) => {
+    const rows = (check(await db.from('treatments').select('id, name, description, kind, placement, needs, component, settings, parts, active, system, sort_order')
+      .eq('archived', false).eq('active', true).order('sort_order')) ?? [])
     const nameOf = (id: string) => rows.find(row => row.id === id)?.name ?? 'a removed treatment'
     return text({
       organisation: org.name,
@@ -176,104 +170,6 @@ export function registerAccountTools(kit: AccountToolKit) {
       })),
       link: link('/library?tab=treatments')
     })
-  }))
-
-  const treatmentInputs = {
-    description: z.string().max(1000).nullable().optional(),
-    placement: z.enum(PLACEMENTS).optional().describe('Where it goes: the hook, the whole video or the CTA'),
-    needs: z.array(z.enum(NEEDS)).max(4).optional().describe('What a recipe must have for it: text (Klip writes it), speaker_video, old_footage, offer (the shoot fills {{offer}})'),
-    settings: z.record(z.string(), z.unknown()).optional().describe('The component\'s settings, e.g. {"position": "top"} (replaces them)'),
-    active: z.boolean().optional().describe('false: off, so it makes no versions (built-in ones are always on)'),
-    combination_of: z.array(z.string().min(1).max(120)).min(2).max(5).optional().describe('Treatment names to draw together, each on its own part of the video (makes it a combination)')
-  }
-  type TreatmentInput = { description?: string | null, placement?: string, needs?: string[], settings?: Record<string, unknown>, active?: boolean, combination_of?: string[] }
-  type TreatmentRow = { id: string, name: string, kind: string, placement: string, needs: string[], component: string, parts: string[], archived: boolean, system: boolean, sort_order: number }
-
-  /** A combination's columns from its parts, as the treatments page makes them. */
-  function combination(rows: TreatmentRow[], names: string[], selfId?: string) {
-    const parts = names.map((name) => {
-      const row = rows.find(entry => same(entry.name, name) && !entry.archived && !entry.parts.length && entry.id !== selfId)
-      if (!row) throw new Error(`"${name}" isn't a single treatment that can be combined.`)
-      return row
-    })
-    const looks = (row: TreatmentRow) => row.kind === 'layout' || row.kind === 'footage'
-    if (parts.filter(looks).length > 1) throw new Error('Only one part can set how the VO looks (face to camera, greenscreen or picture-in-picture).')
-    const overlays = parts.filter(part => !looks(part))
-    if (new Set(overlays.map(part => part.placement)).size < overlays.length) throw new Error('Two overlays can\'t go on the same part of the video.')
-    return { parts: parts.map(part => part.id), kind: parts.find(looks)?.kind ?? 'overlay', placement: 'video', component: 'combo', needs: [...new Set(parts.flatMap(part => part.needs))] }
-  }
-  const allTreatments = async (db: ConnectorDb) => (check(await db.from('treatments').select('id, name, kind, placement, needs, component, parts, archived, system, sort_order')) ?? []) as TreatmentRow[]
-
-  server.registerTool('add_treatment', {
-    title: 'Add treatment',
-    description: 'Add a treatment (the team only): a single one, with a kind and one of the components Klip draws (list_treatments lists them), or a combination of existing ones. Every active treatment makes another version of each recipe, so ask the person first.',
-    inputSchema: z.object({
-      name: z.string().min(1).max(120),
-      kind: z.enum(TREATMENT_KINDS).optional().describe('layout (changes which footage plays), overlay (drawn over the video) or footage (Klip prepares the clips). Not for a combination.'),
-      component: z.string().max(40).optional().describe('What Klip draws (list_treatments\' components). Not for a combination.'),
-      ...treatmentInputs,
-      organisation: organisationArg
-    }),
-    annotations: { readOnlyHint: false, destructiveHint: false }
-  }, guarded(async (input: TreatmentInput & { name: string, kind?: string, component?: string, organisation?: string }, org, db) => {
-    teamOnly(org.role, 'treatments')
-    const rows = await allTreatments(db)
-    if (rows.some(row => same(row.name, input.name))) return failure(`There's already a treatment called ${input.name}.`)
-    let shape: Record<string, unknown>
-    if (input.combination_of) {
-      shape = combination(rows, input.combination_of)
-    } else {
-      if (!input.kind || !input.component) return failure('A single treatment needs a kind and a component (or pass combination_of).')
-      if (!(input.component in COMPONENT_INGREDIENTS)) return failure(`Klip can't draw "${input.component}". It draws ${Object.keys(COMPONENT_INGREDIENTS).join(', ')}.`)
-      shape = { kind: input.kind, component: input.component, placement: input.placement ?? 'hook', needs: input.needs ?? [], parts: [] }
-    }
-    check(await db.from('treatments').insert({
-      name: input.name.trim(),
-      description: input.description?.trim() || null,
-      settings: (input.settings ?? {}) as Json,
-      active: input.active ?? true,
-      sort_order: Math.max(0, ...rows.map(row => row.sort_order)) + 1,
-      ...shape
-    } as unknown as Insert<'treatments'>))
-    return text({ added: 'treatment', organisation: org.name, name: input.name.trim(), ...shape, link: link('/library?tab=treatments') })
-  }))
-
-  server.registerTool('update_treatment', {
-    title: 'Update treatment',
-    description: 'Change a treatment (the team only): rename it, change its description, placement, needs, settings or parts, switch it on or off, or archive or restore it. Built-in ones keep their kind and component and are always on. Turning one on or off changes how many recipes Live shoots get, so ask the person first.',
-    inputSchema: z.object({
-      name: z.string().min(1).max(120).describe('Its current name'),
-      new_name: z.string().min(1).max(120).optional(),
-      ...treatmentInputs,
-      archived: z.boolean().optional(),
-      organisation: organisationArg
-    }),
-    annotations: { readOnlyHint: false, destructiveHint: false }
-  }, guarded(async (input: TreatmentInput & { name: string, new_name?: string, archived?: boolean, organisation?: string }, org, db) => {
-    teamOnly(org.role, 'treatments')
-    const rows = await allTreatments(db)
-    const row = rows.find(entry => same(entry.name, input.name))
-    if (!row) return failure(`There's no treatment "${input.name}" (list_treatments).`)
-    if (row.system && (input.active === false || input.archived)) return failure(`${row.name} is built in: it's always on and can't be archived.`)
-    const fields: Record<string, unknown> = {}
-    if (input.new_name?.trim()) {
-      if (rows.some(entry => entry.id !== row.id && same(entry.name, input.new_name!))) return failure(`There's already a treatment called ${input.new_name}.`)
-      fields.name = input.new_name.trim()
-    }
-    if (input.description !== undefined) fields.description = input.description?.trim() || null
-    if (input.settings !== undefined) fields.settings = input.settings
-    if (input.active !== undefined) fields.active = input.active
-    if (input.archived !== undefined) fields.archived = input.archived
-    if (input.combination_of) {
-      if (!row.parts.length) return failure(`${row.name} is a single treatment, not a combination.`)
-      Object.assign(fields, combination(rows, input.combination_of, row.id))
-    } else if (!row.parts.length) {
-      if (input.placement !== undefined) fields.placement = input.placement
-      if (input.needs !== undefined) fields.needs = input.needs
-    }
-    if (!Object.keys(fields).length) return failure('Nothing to change: pass what should change.')
-    check(await db.from('treatments').update(fields as Update<'treatments'>).eq('id', row.id))
-    return text({ updated: 'treatment', organisation: org.name, name: (fields.name as string) ?? row.name, changed: Object.keys(fields), link: link('/library?tab=treatments') })
   }))
 
   // --- channels -------------------------------------------------------------------------------------

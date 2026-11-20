@@ -2338,6 +2338,7 @@ export type Database = {
           started_by: string | null
           status: string
           submission_rate: number
+          treatments_off: string[]
           updated_at: string
           upload_requested_at: string | null
           upload_requested_by: string | null
@@ -2370,6 +2371,7 @@ export type Database = {
           started_by?: string | null
           status?: string
           submission_rate?: number
+          treatments_off?: string[]
           updated_at?: string
           upload_requested_at?: string | null
           upload_requested_by?: string | null
@@ -2402,6 +2404,7 @@ export type Database = {
           started_by?: string | null
           status?: string
           submission_rate?: number
+          treatments_off?: string[]
           updated_at?: string
           upload_requested_at?: string | null
           upload_requested_by?: string | null
@@ -2451,7 +2454,6 @@ export type Database = {
           kind: string
           name: string
           needs: string[]
-          org_id: string
           parts: string[]
           placement: string
           settings: Json
@@ -2471,7 +2473,6 @@ export type Database = {
           kind: string
           name: string
           needs?: string[]
-          org_id?: string
           parts?: string[]
           placement: string
           settings?: Json
@@ -2491,7 +2492,6 @@ export type Database = {
           kind?: string
           name?: string
           needs?: string[]
-          org_id?: string
           parts?: string[]
           placement?: string
           settings?: Json
@@ -2501,13 +2501,6 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "treatments_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "orgs"
-            referencedColumns: ["id"]
-          },
         ]
       }
       vo_cast: {
