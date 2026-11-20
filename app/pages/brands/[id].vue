@@ -383,6 +383,9 @@ async function saveProduct() {
             </div>
           </UCard>
 
+          <!-- for its static ads; a creator's own, also for a partner's brand (kits aren't shared yet) -->
+          <BrandDesignKit v-if="!isPublisher" :brand="brand" />
+
           <UCard>
             <template #header>
               <div class="flex items-center justify-between">

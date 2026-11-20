@@ -1,5 +1,5 @@
 // Build a shoot's whole folder tree in Dropbox (spec §10d): every clip folder under raw/ and
-// edited/, plus renders/, and (until the edits are in) the plan as manifest.json. Folders that already exist are left
+// edited/, plus renders/ and its brand's _kit/ (statics spec §3), and (until the edits are in) the plan as manifest.json. Folders that already exist are left
 // exactly as they are (no renaming, nothing removed), so this is safe to run again and again:
 // after planning, before each upload, or by hand. Any member of the org; not for drafts, whose
 // codes can still change.
@@ -14,7 +14,9 @@ export default defineEventHandler(async (event) => {
 
   const { accessToken, root } = await dropboxAccess(event, db)
   const auth = { Authorization: `Bearer ${accessToken}` }
-  const paths = skeletonFolders(bundle).map(folder => `${root}/${folder}`)
+  // the shoot's folders, and its brand's design kit folder (logo/, fonts/, packshots/) for Kanvas
+  const kitFolder = brandKitFolder(bundle.brand.slug)
+  const paths = [...skeletonFolders(bundle), ...BRAND_KIT_FOLDERS.map(folder => `${kitFolder}/${folder}`)].map(folder => `${root}/${folder}`)
 
   // autorename off: a folder that's already there comes back as a conflict and is left alone
   type Entry = { '.tag': 'success' } | { '.tag': 'failure', failure: { '.tag': string, path?: { '.tag': string } } }
@@ -38,6 +40,9 @@ export default defineEventHandler(async (event) => {
 
   const created = result.entries.filter(entry => entry['.tag'] === 'success').length
   const failed = result.entries.filter(entry => entry['.tag'] === 'failure' && entry.failure.path?.['.tag'] !== 'conflict').length
+
+  // the kit records where its folder is (the team only: cast building the folders leave it be)
+  await db.from('brand_kits').upsert({ brand_id: bundle.brand.id, dropbox_path: `${root}/${kitFolder}` }, { onConflict: 'brand_id' })
 
   // the plan's manifest, regenerated so it matches the plan; once the shoot is ready for
   // batching, the full manifest (with every clip) is there and left alone
