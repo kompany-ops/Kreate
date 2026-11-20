@@ -18,6 +18,8 @@ export interface CalcItem {
   layoutBeats?: number
   /** VOs: how many combinations its beats' wordings make (1 when no beat has alternates) */
   wordingCombos?: number
+  /** hooks and CTAs: how many wordings it has, each filmed as its own take (default 1) */
+  wordings?: number
   /** VOs: a standalone format's, with its own hook and CTA: never paired with Library ones */
   standalone?: boolean
   /** VOs: how many of its layout beats (a standalone VO's hook and CTA included) are shown face to camera by default */
@@ -177,17 +179,19 @@ export function calculate(input: CalcInput): CalcResult {
     const unplaced = mine.filter(item => !channels.some(channel => channel.id === item.channelId)).length
     if (unplaced) warn(`${person.name}: ${unplaced} item${unplaced === 1 ? '' : 's'} not on one of this shoot's channels`)
     const filmed = recordings(mine)
-    const hooks = filmed.filter(item => item.kind === 'hook').length
+    // a hook or CTA with other wordings is filmed once per wording
+    const takes = (rows: CalcItem[]) => rows.reduce((total, row) => total + Math.max(1, row.wordings ?? 1), 0)
+    const hooks = takes(filmed.filter(item => item.kind === 'hook'))
     const bodies = filmed.filter(item => item.kind === 'body').length
     const ctas = filmed.filter(item => item.kind === 'cta')
-    const syncCtas = ctas.filter(item => item.ctaMode === 'sync').length
-    const voCtas = ctas.length - syncCtas
+    const syncCtas = takes(ctas.filter(item => item.ctaMode === 'sync'))
+    const voCtas = takes(ctas) - syncCtas
     return {
       id: person.id,
       name: person.name,
       hooks,
       bodies,
-      ctas: ctas.length,
+      ctas: takes(ctas),
       syncCtas,
       voCtas,
       // every channel's spot gets its own upload, even when one recording fills several
@@ -247,8 +251,12 @@ export function calculate(input: CalcInput): CalcResult {
     return total
   }
   // a VO linked to hooks / CTAs only goes with those
-  const allowed = (pool: CalcItem[], links: string[] | undefined) =>
-    links?.length ? pool.filter(item => item.templateId && links.includes(item.templateId)).length : pool.length
+  const allowedOf = (pool: CalcItem[], links: string[] | undefined) =>
+    links?.length ? pool.filter(item => item.templateId && links.includes(item.templateId)) : pool
+  const allowed = (pool: CalcItem[], links: string[] | undefined) => allowedOf(pool, links).length
+  /** the extra versions a VO's first wordings make with its hooks' and CTAs' other wordings (wording mixes) */
+  const hookCtaMixes = (hooks: CalcItem[], ctas: CalcItem[]) => hooks.reduce((total, hook) => total + ctas.reduce((sum, cta) =>
+    sum + Math.min(wordingVariations, Math.max(1, hook.wordings ?? 1) * Math.max(1, cta.wordings ?? 1) - 1), 0), 0)
 
   channels.forEach((channel, index) => {
     const result = perChannel[index]!
@@ -271,8 +279,9 @@ export function calculate(input: CalcInput): CalcResult {
         if ((body.linkedHooks?.length && !withHooks) || (body.linkedCtas?.length && !withCtas)) {
           warn(`${body.label ?? 'A VO'}: none of its linked ${!withHooks && body.linkedHooks?.length ? 'hooks' : 'CTAs'} are on this shoot for ${person.name} on ${channel.name}`)
         }
-        recipes += withTreatments(body, versionsOf(body) * withHooks * withCtas * brollVariations)
-        concepts += versionsOf(body) * withHooks
+        const mixes = hookCtaMixes(allowedOf(hookItems, body.linkedHooks), allowedOf(ctaItems, body.linkedCtas))
+        recipes += withTreatments(body, (versionsOf(body) * withHooks * withCtas + mixes) * brollVariations)
+        concepts += versionsOf(body) * withHooks + mixes
       }
       result.hooks += hooks
       result.recipes += recipes

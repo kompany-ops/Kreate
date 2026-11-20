@@ -543,3 +543,47 @@ describe('wordingMixesAvailable', () => {
     expect(wordingMixesAvailable([{ kind: 'hook', script_snapshot: hooks4 }])).toBe(0)
   })
 })
+
+describe('hook and CTA wordings', () => {
+  const clips = () => [
+    take('hook', 'H01', 'joe', 'nix'),
+    take('hook', 'H01', 'joe', 'nix', { option: 2, file: 'nix/hook/joe/H01-2.mp4' }),
+    take('hook', 'H01', 'joe', 'nix', { option: 3, file: 'nix/hook/joe/H01-3.mp4' }),
+    ...vo('V01', 'joe', 'nix', [['problem', 3], ['product', 2]]),
+    take('cta', 'C01', 'joe', 'nix'),
+    take('cta', 'C01', 'joe', 'nix', { option: 2, file: 'nix/cta/joe/C01-2.mp4' }),
+    ...nixBroll
+  ]
+  const withMixes = (mixes: number) => {
+    const built = manifest(clips())
+    built.plan.shoot = { code: 'S001', wording_variations: mixes } as Manifest['plan']['shoot']
+    return buildRecipes(built)
+  }
+
+  it('makes the first wordings\' recipe, and other wordings only as wording mixes', () => {
+    expect(withMixes(0).map(recipe => [recipe.hook.option, recipe.cta.option])).toEqual([[1, 1]])
+    const mixed = withMixes(5)
+    // 3 hook wordings × 2 CTA wordings: the first, and every other combination
+    expect(mixed).toHaveLength(6)
+    expect(new Set(mixed.map(recipe => `${recipe.hook.option}.${recipe.cta.option}`)).size).toBe(6)
+    expect(withMixes(2)).toHaveLength(3)
+  })
+
+  it('names the wording in the ID and plays its own take, scored as the one hook or CTA', () => {
+    const recipe = withMixes(5).find(entry => entry.hook.option === 3 && entry.cta.option === 2)!
+    expect(recipe.id).toMatch(/^S001_nix_joe_H01-3_V01_C01-2_[0-9a-f]{8}$/)
+    expect(recipe.hook).toMatchObject({ code: 'H01', option: 3, file: 'nix/hook/joe/H01-3.mp4' })
+    expect(recipe.cta).toMatchObject({ code: 'C01', option: 2, file: 'nix/cta/joe/C01-2.mp4' })
+    expect(recipeElements(recipe)).toEqual(expect.arrayContaining([{ kind: 'hook', key: 'H01' }, { kind: 'cta', key: 'C01' }]))
+    // the first wordings' recipe keeps the ID it always had
+    expect(withMixes(5).find(entry => entry.hook.option === 1 && entry.cta.option === 1)!.id).toMatch(/^S001_nix_joe_H01_V01_C01_[0-9a-f]{8}$/)
+  })
+
+  it('counts a hook\'s and a CTA\'s wordings in the mixes available', () => {
+    expect(wordingMixesAvailable([
+      { kind: 'hook', script_snapshot: 'a', alternates: ['b', 'c'] },
+      { kind: 'cta', script_snapshot: 'd', alternates: ['e'] },
+      { kind: 'body', script_snapshot: [{ beat: 'problem', script: 'x', alternates: [{ script: 'y' }] }] }
+    ])).toBe(5)
+  })
+})

@@ -41,24 +41,27 @@ import { hasIngredient, isDrawable, treatmentIngredients } from './klip'
 import { beatWordings, parseBeats, slugify } from './slots'
 
 /**
- * The most wording mixes any VO on a shoot can make: every combination of its beats' wordings
- * other than the first wordings. More than this adds nothing.
+ * The most wording mixes a shoot can make: every combination of a VO's beats' wordings other than
+ * the first ones, or of a hook's and a CTA's wordings. More than this adds nothing.
  */
-export function wordingMixesAvailable(items: { kind: string, script_snapshot: unknown }[]): number {
-  return Math.max(0, ...items
+export function wordingMixesAvailable(items: { kind: string, script_snapshot: unknown, alternates?: string[] }[]): number {
+  const wordings = (kind: string) => Math.max(1, ...items.filter(item => item.kind === kind).map(item => 1 + (item.alternates?.length ?? 0)))
+  return Math.max(0, wordings('hook') * wordings('cta') - 1, ...items
     .filter(item => item.kind === 'body')
     .map(item => parseBeats(item.script_snapshot).reduce((product, beat) => product * Math.max(1, beatWordings(beat).length), 1) - 1))
 }
 
 /**
  * recipes.json's version.
+ * 4: `hook` and `cta` carry `option`, which wording of a Library hook or CTA it is (1 = the line;
+ * 2, 3… its other wordings, a take each: `<code>-<option>`); IDs name it the same way.
  * 3: each take (hook, cta, every beat) carries `blocks` (its captions, and what the shoot's
  * treatments need: `cutout`, `captions-retro`) and `klip_text` (a search query, placed text),
  * replacing `hook.caption`, `cta.caption` and `vo_captions`; a treated version keeps the untreated
  * version's files, and its `treatment` drops `sidecar` and `applies_to` (docs/contract.md §7).
  * 2: treated versions, with files swapped for Klip's treated copies.
  */
-export const RECIPES_SCHEMA_VERSION = 3
+export const RECIPES_SCHEMA_VERSION = 4
 
 export interface RecipeBeat {
   beat: string
@@ -95,11 +98,11 @@ export interface Recipe {
    * The opening. A standalone VO's is its hook beat (`take` says which wording), shown face or over
    * b-roll; a Library hook is always on camera.
    */
-  hook: { code: string, person: string, item_id: string, take: string | null, file: string, blocks: TakeBlocks | null, klip_text: TakeText | null, duration: number, hook_type: string | null, show: BeatShow, broll: string[], text: string | null }
+  hook: { code: string, option: number, person: string, item_id: string, take: string | null, file: string, blocks: TakeBlocks | null, klip_text: TakeText | null, duration: number, hook_type: string | null, show: BeatShow, broll: string[], text: string | null }
   /** item_id: the VO's item (a mixed VO's items joined with +); item_ids: each one. A standalone VO's beats are its middle ones. */
   vo: { code: string, item_id: string, item_ids: string[], format: string | null, beats: RecipeBeat[] }
   /** The close. A standalone VO's is its CTA beat (mode sync when shown face, vo over b-roll, or screen / voice_note). */
-  cta: { code: string, person: string, item_id: string, take: string | null, mode: string | null, file: string, blocks: TakeBlocks | null, klip_text: TakeText | null, duration: number, broll: string[], text: string | null }
+  cta: { code: string, option: number, person: string, item_id: string, take: string | null, mode: string | null, file: string, blocks: TakeBlocks | null, klip_text: TakeText | null, duration: number, broll: string[], text: string | null }
   /** the treatment this version carries (null = untreated): the renderer composes it from the takes' blocks */
   treatment: RecipeTreatment | null
 }
@@ -253,8 +256,26 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
 
   for (const channel of [...new Set(takes.map(take => take.channel))]) {
     const onChannel = takes.filter(take => take.channel === channel)
-    const hooksOn = onChannel.filter(take => take.kind === 'hook' && take.duration)
-    const ctasOn = onChannel.filter(take => take.kind === 'cta' && take.duration)
+    // Library hooks and CTAs by their first wording; their other wordings (H01-2…) come in as wording mixes
+    const firstWording = (take: TakeClip) => (take.option ?? 1) === 1
+    const hooksOn = onChannel.filter(take => take.kind === 'hook' && take.duration && firstWording(take))
+    const ctasOn = onChannel.filter(take => take.kind === 'cta' && take.duration && firstWording(take))
+    /** a hook or CTA take's every wording with a length, the first first */
+    const wordingsOf = (take: TakeClip) => [take, ...onChannel
+      .filter(other => other.kind === take.kind && other.item_id === take.item_id && !firstWording(other) && other.duration)
+      .sort((a, b) => (a.option ?? 1) - (b.option ?? 1))]
+    /** the version's hook and CTA: the first wordings, then up to the shoot's wording mixes of their other wordings */
+    const hookCtaPairs = (hooks: TakeClip[], ctas: TakeClip[], mixWordings: boolean, seed: string) => hooks.flatMap(hook => ctas.flatMap((cta) => {
+      const pairs: [TakeClip, TakeClip][] = [[hook, cta]]
+      if (!mixWordings) return pairs
+      const [hookWordings, ctaWordings] = [wordingsOf(hook), wordingsOf(cta)]
+      for (const [h, c] of pickCombos([hookWordings.length, ctaWordings.length], wordingVariations, `${seed}|${hook.code}|${cta.code}`)) {
+        pairs.push([hookWordings[h!]!, ctaWordings[c!]!])
+      }
+      return pairs
+    }))
+    /** how a hook or CTA is named in a recipe ID: its code, and which wording when not the first */
+    const named = (take: TakeClip) => (take.option ?? 1) > 1 ? `${take.code}-${take.option}` : take.code
     const channelBrollAll = broll.filter(clip => clip.channel === channel)
 
     // each person's takes of each VO (by code): beat -> its wordings, in order
@@ -323,98 +344,97 @@ export function buildRecipes(manifest: Manifest): Recipe[] {
           // a combination's other parts have to apply too
           if (!nonLayoutParts(layoutTreatment).every(meets)) continue
         }
-        for (const hook of hookChoices) {
-          for (const cta of ctaChoices) {
-            // a combination's ingredients, on these takes
-            if (layoutTreatment && !hasIngredients(layoutTreatment, covered(hook, cta))) continue
-            const base = standalone
-              ? mixed
-                ? `${shoot}_${channel}_mix_${first.code}-${beats.map(beat => beat.person).join('.')}`
-                : `${shoot}_${channel}_${people}_${first.code}${wordingKey}`
-              : mixed
-                ? `${shoot}_${channel}_mix_${hook.person}-${hook.code}_${first.code}-${beats.map(beat => beat.person).join('.')}_${cta.person}-${cta.code}`
-                : `${shoot}_${channel}_${people}_${hook.code}_${first.code}${wordingKey}_${cta.code}`
-            const seen = new Set<string>()
-            for (let variation = 0; variation < brollVariations; variation++) {
-              // the first selection keeps the seed recipes always had, so their IDs don't change
-              const seed = variation ? `${base}|v${variation}` : base
-              const played: BrollState = { uses: new Map(), last: null }
-              const cover = (take: TakeClip, own: BrollClip[], extra: BrollClip[], key: string) => fill(take.duration!, own, extra, played, `${seed}|${key}`)
-              const sectionOf = (name: string) => channelBroll.filter(clip => clip.section === slugify(name))
+        // a modular VO's first wordings also go with its hooks' and CTAs' other wordings (wording mixes)
+        for (const [hook, cta] of hookCtaPairs(hookChoices, ctaChoices, !standalone && !mixed && wordingKey === '', `${shoot}|${channel}|${first.code}|${people}`)) {
+          // a combination's ingredients, on these takes
+          if (layoutTreatment && !hasIngredients(layoutTreatment, covered(hook, cta))) continue
+          const base = standalone
+            ? mixed
+              ? `${shoot}_${channel}_mix_${first.code}-${beats.map(beat => beat.person).join('.')}`
+              : `${shoot}_${channel}_${people}_${first.code}${wordingKey}`
+            : mixed
+              ? `${shoot}_${channel}_mix_${hook.person}-${hook.code}_${first.code}-${beats.map(beat => beat.person).join('.')}_${cta.person}-${cta.code}`
+              : `${shoot}_${channel}_${people}_${named(hook)}_${first.code}${wordingKey}_${named(cta)}`
+          const seen = new Set<string>()
+          for (let variation = 0; variation < brollVariations; variation++) {
+            // the first selection keeps the seed recipes always had, so their IDs don't change
+            const seed = variation ? `${base}|v${variation}` : base
+            const played: BrollState = { uses: new Map(), last: null }
+            const cover = (take: TakeClip, own: BrollClip[], extra: BrollClip[], key: string) => fill(take.duration!, own, extra, played, `${seed}|${key}`)
+            const sectionOf = (name: string) => channelBroll.filter(clip => clip.section === slugify(name))
 
-              // a standalone hook shown over b-roll is covered like a beat
-              let hookBroll: string[] = []
-              if (standalone && showOf(hook) === 'broll') {
-                const files = cover(hook, sectionOf(HOOK_BEAT), productShots, HOOK_BEAT)
-                if (!files) break
-                hookBroll = files
-              }
-              const filled: RecipeBeat[] = []
-              let valid = true
-              for (const beat of body) {
-                let files: string[] = []
-                // a beat without b-roll sits between: what came before it isn't back to back with what follows
-                if (showOf(beat) !== 'broll') played.last = null
-                if (showOf(beat) === 'broll') {
-                  // general product shots top a beat up only when its own clips run short
-                  const picked = cover(beat, sectionOf(beat.beat ?? ''), productShots, beat.beat ?? '')
-                  if (!picked) {
-                    valid = false
-                    break
-                  }
-                  files = picked
+            // a standalone hook shown over b-roll is covered like a beat
+            let hookBroll: string[] = []
+            if (standalone && showOf(hook) === 'broll') {
+              const files = cover(hook, sectionOf(HOOK_BEAT), productShots, HOOK_BEAT)
+              if (!files) break
+              hookBroll = files
+            }
+            const filled: RecipeBeat[] = []
+            let valid = true
+            for (const beat of body) {
+              let files: string[] = []
+              // a beat without b-roll sits between: what came before it isn't back to back with what follows
+              if (showOf(beat) !== 'broll') played.last = null
+              if (showOf(beat) === 'broll') {
+                // general product shots top a beat up only when its own clips run short
+                const picked = cover(beat, sectionOf(beat.beat ?? ''), productShots, beat.beat ?? '')
+                if (!picked) {
+                  valid = false
+                  break
                 }
-                filled.push({
-                  beat: beat.beat ?? '', option: beat.option ?? 1, person: beat.person, show: showOf(beat), vo: beat.file,
-                  blocks: beat.blocks ?? null, klip_text: beat.text ?? null,
-                  text: showOf(beat) === 'screen' ? beat.script : null, duration: beat.duration!, broll: files
-                })
+                files = picked
               }
-              if (!valid) break
-              // a VO CTA (or a standalone CTA shown over b-roll) plays over b-roll, product shots first
-              const ctaShow = showOf(cta)
-              const ctaMode = standalone ? (ctaShow === 'face' ? 'sync' : ctaShow === 'broll' ? 'vo' : ctaShow) : cta.mode
-              let ctaBroll: string[] = []
-              if (ctaMode === 'vo') {
-                const others = channelBroll.filter(clip => clip.section !== 'general')
-                const files = cover(cta, productShots, others, 'cta')
-                if (!files) break
-                ctaBroll = files
-              }
-              const picks = [...hookBroll, '|', ...filled.flatMap(beat => beat.broll), '|', ...ctaBroll].join(',')
-              // the first selection's picks keep the shape they always had, so its ID doesn't change
-              const idPicks = hookBroll.length ? picks : [...filled.flatMap(beat => beat.broll), '|', ...ctaBroll].join(',')
-              // too little b-roll for another different selection
-              if (seen.has(picks)) continue
-              seen.add(picks)
-              const recipe: Recipe = {
-                // a treated version ends in the treatment's name; untreated IDs are as they always were
-                id: `${base}_${shortHash(idPicks)}${layoutTreatment ? `_${layoutTreatment.slug}` : ''}`,
-                channel,
-                person: people,
-                mixed,
-                standalone,
-                hook: {
-                  code: hook.code, person: hook.person, item_id: hook.item_id, take: standalone ? takeKeyOf(hook) : null,
-                  file: hook.file, blocks: hook.blocks ?? null, klip_text: hook.text ?? null, duration: hook.duration!, hook_type: hook.hook_type,
-                  show: standalone ? showOf(hook) : 'face', broll: hookBroll,
-                  text: standalone && showOf(hook) === 'screen' ? hook.script : null
-                },
-                vo: { code: first.code, item_id: itemIds.join('+'), item_ids: itemIds, format: first.format, beats: filled },
-                cta: {
-                  code: cta.code, person: cta.person, item_id: cta.item_id, take: standalone ? takeKeyOf(cta) : null,
-                  mode: ctaMode, file: cta.file, blocks: cta.blocks ?? null, klip_text: cta.text ?? null, duration: cta.duration!, broll: ctaBroll,
-                  text: standalone && ctaShow === 'screen' ? cta.script : null
-                },
-                treatment: layoutTreatment
-              }
-              recipes.push(recipe)
-              // the other treatments: a version of the untreated recipe for each that applies, with
-              // the same files (the renderer composes the treatment from the takes' blocks)
-              if (!layoutTreatment) {
-                for (const treatment of others.filter(treatment => applies(treatment, hook, cta))) {
-                  recipes.push({ ...recipe, id: `${recipe.id}_${treatment.slug}`, treatment })
-                }
+              filled.push({
+                beat: beat.beat ?? '', option: beat.option ?? 1, person: beat.person, show: showOf(beat), vo: beat.file,
+                blocks: beat.blocks ?? null, klip_text: beat.text ?? null,
+                text: showOf(beat) === 'screen' ? beat.script : null, duration: beat.duration!, broll: files
+              })
+            }
+            if (!valid) break
+            // a VO CTA (or a standalone CTA shown over b-roll) plays over b-roll, product shots first
+            const ctaShow = showOf(cta)
+            const ctaMode = standalone ? (ctaShow === 'face' ? 'sync' : ctaShow === 'broll' ? 'vo' : ctaShow) : cta.mode
+            let ctaBroll: string[] = []
+            if (ctaMode === 'vo') {
+              const others = channelBroll.filter(clip => clip.section !== 'general')
+              const files = cover(cta, productShots, others, 'cta')
+              if (!files) break
+              ctaBroll = files
+            }
+            const picks = [...hookBroll, '|', ...filled.flatMap(beat => beat.broll), '|', ...ctaBroll].join(',')
+            // the first selection's picks keep the shape they always had, so its ID doesn't change
+            const idPicks = hookBroll.length ? picks : [...filled.flatMap(beat => beat.broll), '|', ...ctaBroll].join(',')
+            // too little b-roll for another different selection
+            if (seen.has(picks)) continue
+            seen.add(picks)
+            const recipe: Recipe = {
+              // a treated version ends in the treatment's name; untreated IDs are as they always were
+              id: `${base}_${shortHash(idPicks)}${layoutTreatment ? `_${layoutTreatment.slug}` : ''}`,
+              channel,
+              person: people,
+              mixed,
+              standalone,
+              hook: {
+                code: hook.code, option: hook.option ?? 1, person: hook.person, item_id: hook.item_id, take: standalone ? takeKeyOf(hook) : null,
+                file: hook.file, blocks: hook.blocks ?? null, klip_text: hook.text ?? null, duration: hook.duration!, hook_type: hook.hook_type,
+                show: standalone ? showOf(hook) : 'face', broll: hookBroll,
+                text: standalone && showOf(hook) === 'screen' ? hook.script : null
+              },
+              vo: { code: first.code, item_id: itemIds.join('+'), item_ids: itemIds, format: first.format, beats: filled },
+              cta: {
+                code: cta.code, option: cta.option ?? 1, person: cta.person, item_id: cta.item_id, take: standalone ? takeKeyOf(cta) : null,
+                mode: ctaMode, file: cta.file, blocks: cta.blocks ?? null, klip_text: cta.text ?? null, duration: cta.duration!, broll: ctaBroll,
+                text: standalone && ctaShow === 'screen' ? cta.script : null
+              },
+              treatment: layoutTreatment
+            }
+            recipes.push(recipe)
+            // the other treatments: a version of the untreated recipe for each that applies, with
+            // the same files (the renderer composes the treatment from the takes' blocks)
+            if (!layoutTreatment) {
+              for (const treatment of others.filter(treatment => applies(treatment, hook, cta))) {
+                recipes.push({ ...recipe, id: `${recipe.id}_${treatment.slug}`, treatment })
               }
             }
           }

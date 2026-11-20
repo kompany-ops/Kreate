@@ -52,7 +52,7 @@ describe('the Klip contract', () => {
 
   it('parses the example index, and refuses a version it doesn’t know', () => {
     expect(parseKlipIndex(example).error).toBeUndefined()
-    expect(parseKlipIndex({ ...example, schema_version: 1 }).error).toMatch(/contract version 1; Kreate reads version 2/)
+    expect(parseKlipIndex({ ...example, schema_version: 1 }).error).toMatch(/contract version 1; Kreate reads version 3/)
     expect(parseKlipIndex({ ...example, takes: [{ spot: 'x' }] }).error).toMatch(/isn't valid/)
   })
 

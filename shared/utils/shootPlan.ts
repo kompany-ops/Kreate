@@ -40,6 +40,7 @@ export function copyFor(shootId: string, group: ShotGroup, personId: string, cha
     cta_mode: source.cta_mode,
     location: source.location,
     script_snapshot: source.script_snapshot as Json,
+    alternates: source.alternates ?? [],
     caption: source.caption ?? null,
     sort_order: source.sort_order
   }
@@ -259,10 +260,30 @@ export async function planShoot(db: Db, bundle: LoadedShoot) {
       db.from('shoot_items').update({
         script_snapshot: entry.script_snapshot as unknown as Json,
         script_override: entry.script_override as unknown as Json,
+        alternates: entry.alternates,
         caption: entry.caption
       }).eq('id', entry.id)
     ))
     results.forEach(check)
   }
   check(await db.from('shoots').update({ status: 'planned' }).eq('id', bundle.shoot.id))
+}
+
+/** The most wordings a hook or CTA can have on a shoot: the line and five more. */
+export const MAX_ALTERNATES = 5
+
+/**
+ * A hook or CTA's other wordings on a draft shoot, for everyone on it (wordings 2, 3…, each filmed
+ * as its own take). Replaces what it had; empty and repeated wordings are dropped.
+ */
+export async function setAlternates(db: Db, bundle: LoadedShoot, group: ShotGroup, alternates: string[]) {
+  if (bundle.shoot.status !== 'draft') throw new Error(`${bundle.shoot.code} isn't a draft, so its wordings are frozen.`)
+  if (group.kind === 'body') throw new Error('A VO\'s wordings are on its beats: change them in the VO.')
+  const first = (typeof group.items[0]?.script_snapshot === 'string' ? group.items[0].script_snapshot : '').trim()
+  const clean = [...new Set(alternates.map(text => text.trim()).filter(text => text && text !== first))]
+  if (clean.length > MAX_ALTERNATES) throw new Error(`At most ${MAX_ALTERNATES} more wordings (${MAX_ALTERNATES + 1} in all).`)
+  for (let i = 0; i < group.items.length; i += BATCH) {
+    check(await db.from('shoot_items').update({ alternates: clean }).in('id', group.items.slice(i, i + BATCH).map(item => item.id)))
+  }
+  return clean
 }

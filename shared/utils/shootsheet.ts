@@ -7,6 +7,8 @@ import type { ItemKind } from './calculator'
 import { isDrawable, planHash } from './klip'
 
 /**
+ * 11: hooks and CTAs carry `alternates`, their other wordings, each a take of its own
+ * (`<code>-<option>`, docs/contract.md §3).
  * 10: treatments drop `sidecar` and `applies_to`: Klip makes building blocks, and what each
  * treatment needs follows from its `component` (docs/contract.md §5). Only treatments the renderer
  * can draw are listed.
@@ -24,7 +26,7 @@ import { isDrawable, planHash } from './klip'
  * `broll_variations`, now used). 3: b-roll shots no
  * longer carry product_visible or min_clips. 2: custom slot values moved to plan.shoot.
  */
-export const SHOOTSHEET_SCHEMA_VERSION = 10
+export const SHOOTSHEET_SCHEMA_VERSION = 11
 export const DEFAULT_BEATS = ['problem', 'product', 'result']
 
 export interface BundleChannel {
@@ -46,6 +48,8 @@ export interface BundleItem {
   channel_id: string | null
   script_snapshot: unknown
   script_override: unknown
+  /** hooks and CTAs: wordings 2, 3… of the line, for everyone on the shoot (each its own take) */
+  alternates?: string[]
   cta_mode: string | null
   location: string | null
   status: string
@@ -241,8 +245,8 @@ export function nextItemCodes(existingCodes: string[], prefix: string, count: nu
  * spot. Items with the same key are one recording. A draft's script still says {{pet}} (say), so
  * it's per channel; a planned shoot's has each channel's value filled in, so it differs anyway.
  */
-export function recordingKey(item: Pick<BundleItem, 'person_id' | 'channel_id' | 'code' | 'script_snapshot' | 'script_override'>, channelSlots: readonly string[] = []): string {
-  const script = JSON.stringify(item.script_override ?? item.script_snapshot ?? '')
+export function recordingKey(item: Pick<BundleItem, 'person_id' | 'channel_id' | 'code' | 'script_snapshot' | 'script_override' | 'alternates'>, channelSlots: readonly string[] = []): string {
+  const script = JSON.stringify([item.script_override ?? item.script_snapshot ?? '', ...(item.alternates ?? [])])
   const perChannel = channelSlotsIn(script, channelSlots).length > 0
   return `${item.person_id}|${item.code}|${perChannel ? item.channel_id : '*'}|${script}`
 }
@@ -319,6 +323,8 @@ export function mergeVariants(texts: string[]): string {
 export interface ResolvedScript {
   /** hooks and CTAs */
   text: string | null
+  /** hooks and CTAs: wordings 2, 3…, slots filled ([] for VOs: theirs are on each beat) */
+  alternates: string[]
   /** bodies */
   beats: Beat[] | null
   unfilled: string[]
@@ -328,21 +334,29 @@ export interface ResolvedScript {
 /** The script that will be performed: override over snapshot, slots filled. */
 export function resolveItemScript(
   bundle: Pick<ShootBundle, 'shoot' | 'brand' | 'product' | 'channels'>,
-  item: Pick<BundleItem, 'kind' | 'channel_id' | 'script_snapshot' | 'script_override'>
+  item: Pick<BundleItem, 'kind' | 'channel_id' | 'script_snapshot' | 'script_override' | 'alternates'>
 ): ResolvedScript {
   const overridden = item.script_override !== null && item.script_override !== undefined
   const source = overridden ? item.script_override : item.script_snapshot
   const context = itemSlotContext(bundle, item.channel_id)
   if (item.kind === 'body') {
     const result = renderBeats(parseBeats(source), context)
-    return { text: null, beats: result.beats, unfilled: result.unfilled, overridden }
+    return { text: null, beats: result.beats, unfilled: result.unfilled, overridden, alternates: [] }
   }
   const result = renderScript(typeof source === 'string' ? source : '', context)
-  return { text: result.text, beats: null, unfilled: result.unfilled, overridden }
+  const unfilled = [...result.unfilled]
+  const alternates = (item.alternates ?? []).map((wording) => {
+    const rendered = renderScript(wording, context)
+    for (const name of rendered.unfilled) if (!unfilled.includes(name)) unfilled.push(name)
+    return rendered.text
+  })
+  return { text: result.text, beats: null, unfilled, overridden, alternates }
 }
 
+/** The script as one line of text: a VO's beats joined, a hook or CTA's wordings numbered after the first. */
 export function scriptAsText(script: ResolvedScript): string {
-  return script.beats ? joinBeats(script.beats) : script.text ?? ''
+  if (script.beats) return joinBeats(script.beats)
+  return [script.text ?? '', ...script.alternates.map((wording, index) => `[${index + 2}] ${wording}`)].join(' ')
 }
 
 /** Items that still have unfilled slots: these block "Mark as planned" and exports. */
@@ -396,6 +410,7 @@ export function planSnapshots(bundle: ShootBundle): {
   id: string
   script_snapshot: string | Beat[]
   script_override: string | Beat[] | null
+  alternates: string[]
   caption: string | null
 }[] {
   return bundle.items.map((item) => {
@@ -407,6 +422,7 @@ export function planSnapshots(bundle: ShootBundle): {
       id: item.id,
       script_snapshot: snapshot.beats ?? snapshot.text ?? '',
       script_override: override ? override.beats ?? override.text ?? '' : null,
+      alternates: snapshot.alternates,
       caption: item.caption ? renderScript(item.caption, itemSlotContext(bundle, item.channel_id)).text : null
     }
   })
@@ -452,6 +468,8 @@ export function takeSpot(bundle: ShootBundle, item: BundleItem, beat: string | n
   const folder = `${channelFolder(bundle, item.channel_id)}/${KIND_FOLDER[item.kind]}/${person}`
   if (!beat) return `${folder}/${item.code}`
   const take = parseTakeKey(beat)
+  // a hook or CTA's other wordings sit beside it: H01-2
+  if (!take.beat) return `${folder}/${item.code}-${take.option}`
   return `${folder}/${slugify(take.beat) || 'beat'}/${item.code}${take.option > 1 ? `-${take.option}` : ''}`
 }
 
@@ -485,10 +503,11 @@ export const isVoiceover = (item: Pick<BundleItem, 'kind' | 'cta_mode'>) =>
 /**
  * The takes a VO is recorded in, one file each: every wording of every filmed beat, as take keys
  * (the beat's name for its first wording, `<beat>~2`… for alternates). A beat shown on screen is
- * text, not filmed, so it has none. Hooks and CTAs are one take (null).
+ * text, not filmed, so it has none. A hook or CTA is a take per wording: the line (null), then
+ * `~2`, `~3`… for its alternates.
  */
-export function itemBeats(item: Pick<BundleItem, 'kind' | 'script_snapshot' | 'format'>): (string | null)[] {
-  if (item.kind !== 'body') return [null]
+export function itemBeats(item: Pick<BundleItem, 'kind' | 'script_snapshot' | 'format' | 'alternates'>): (string | null)[] {
+  if (item.kind !== 'body') return [null, ...(item.alternates ?? []).map((_, index) => takeKey('', index + 2))]
   const takes = parseBeats(item.script_snapshot)
     .filter(beat => isFilmed(beatShow(item.format, beat.beat)))
     .flatMap(beat => beatWordings(beat).map(wording => takeKey(beat.beat, wording.option)))
@@ -498,6 +517,7 @@ export function itemBeats(item: Pick<BundleItem, 'kind' | 'script_snapshot' | 'f
 /** "problem", or "problem (2)" for its second wording: how a take is labelled. */
 export function takeLabel(key: string): string {
   const take = parseTakeKey(key)
+  if (!take.beat) return `wording ${take.option}`
   return take.option > 1 ? `${take.beat} (${take.option})` : take.beat
 }
 
@@ -702,9 +722,16 @@ export function buildShootsheet(bundle: ShootBundle) {
       // clips as files without extension: file = the edited clip, which the worker reads;
       // raw_file = where it was uploaded. A VO is recorded beat by beat, a file each.
       const folders = { file: itemPath(bundle, item, 'edited'), raw_file: itemPath(bundle, item, 'raw') }
+      // a hook or CTA's other wordings: each its own take beside it (H01-2)
+      const wordingTakes = () => script.alternates.map((text, index) => ({
+        option: index + 2,
+        script: text,
+        file: itemPath(bundle, item, 'edited', takeKey('', index + 2)),
+        raw_file: itemPath(bundle, item, 'raw', takeKey('', index + 2))
+      }))
       if (item.kind === 'hook') {
         const caption = item.caption ? renderScript(item.caption, itemSlotContext(bundle, item.channel_id)).text : null
-        return { ...base, hook_type: item.hook_type, script: script.text ?? '', caption, ...folders }
+        return { ...base, hook_type: item.hook_type, script: script.text ?? '', caption, ...folders, alternates: wordingTakes() }
       }
       if (item.kind === 'body') {
         // a take per wording of each beat
@@ -724,7 +751,7 @@ export function buildShootsheet(bundle: ShootBundle) {
           hooks: linkedCodes(bundle, item, 'hook'), ctas: linkedCodes(bundle, item, 'cta'), beats
         }
       }
-      return { ...base, cta_mode: item.cta_mode, script: script.text ?? '', ...folders }
+      return { ...base, cta_mode: item.cta_mode, script: script.text ?? '', ...folders, alternates: wordingTakes() }
     }),
     // the treatments that are on and can be drawn: recipes get a version for each one that applies
     // (§12b). Klip makes what each needs from its component (docs/contract.md §5).
@@ -834,6 +861,8 @@ export function skeletonFolders(bundle: ShootBundle): string[] {
 }
 
 /**
+ * 12: a hook or CTA clip can be another wording of it (`option` 2, 3…, its file `<code>-<option>`);
+ * the plan follows shoot sheet 11.
  * 11: the manifest carries `plan_hash` (what Klip works from, hashed); take clips carry `role`,
  * `blocks` (captions and what treatments need, replacing `caption` and `sidecars`) and `text` (what
  * Klip wrote for treatments), with lengths from Klip's index; the plan follows shoot sheet 10
@@ -851,7 +880,7 @@ export function skeletonFolders(bundle: ShootBundle): string[] {
  * longer carry product_visible. 3: clips carry `feature` (VOs the feature they're about, b-roll its
  * feature folder or null).
  */
-export const MANIFEST_SCHEMA_VERSION = 11
+export const MANIFEST_SCHEMA_VERSION = 12
 
 /**
  * The manifest before the edits are in (spec §14): just the plan, version 0, no clips. Written

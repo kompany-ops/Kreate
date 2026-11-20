@@ -167,7 +167,7 @@ export interface TakeClip extends ClipBase {
   code: string
   /** VOs: the beat this file is */
   beat: string | null
-  /** VOs: which wording of the beat (1 = the first; alternates 2, 3…) */
+  /** which wording: of a VO's beat (1 = the first; alternates 2, 3…), or of a hook or CTA (null = the first) */
   option?: number | null
   /**
    * VOs: how the beat is shown: the speaker on camera (face), their voice over b-roll (broll), a
@@ -244,8 +244,10 @@ export function buildManifest(
     const indexed = bySpot.get(spot.toLowerCase())
     if (!indexed) continue
     const script = resolveItemScript(bundle, item)
-    // a VO take: one wording of one beat
-    const take = beat ? parseTakeKey(beat) : null
+    // a VO take: one wording of one beat; a hook or CTA's other wording: just its option
+    const parsed = beat ? parseTakeKey(beat) : null
+    const take = parsed?.beat ? parsed : null
+    const option = parsed?.option ?? 1
     const wording = take ? beatWordings(script.beats?.find(b => b.beat === take.beat) ?? { beat: take.beat, script: '' }).find(w => w.option === take.option) : null
     // the blocks the shoot needs of this take: captions always, plus its treatments' blocks
     const blocks: TakeBlocks = { captions: indexed.files.captions }
@@ -266,7 +268,7 @@ export function buildManifest(
       person: personSlug(item.person_id),
       code: item.code,
       beat: take?.beat ?? null,
-      option: take?.option ?? null,
+      option: take ? take.option : option > 1 ? option : null,
       show: take ? beatShow(item.format, take.beat) : null,
       ...(item.kind === 'body' ? { standalone: isStandalone(item) } : {}),
       format: item.format?.code ?? null,
@@ -275,7 +277,7 @@ export function buildManifest(
       ctas: item.kind === 'body' ? linkedCodes(bundle, item, 'cta') : null,
       mode: item.cta_mode,
       hook_type: item.kind === 'hook' ? item.hook_type : wording?.hook_type ?? null,
-      script: take ? wording?.script ?? '' : script.text ?? '',
+      script: take ? wording?.script ?? '' : option > 1 ? script.alternates[option - 2] ?? '' : script.text ?? '',
       file: indexed.files.clip!,
       raw_file: indexed.raw_file,
       blocks,

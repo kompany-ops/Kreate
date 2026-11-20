@@ -25,7 +25,12 @@ const spot = (item: BundleItem) => ({
 /** what's said in this take, for its captions */
 const script = computed(() => {
   const resolved = resolveItemScript(props.bundle, first.value)
-  return props.recording.beat ? resolved.beats?.find(beat => beat.beat === props.recording.beat)?.script ?? '' : resolved.text ?? ''
+  if (!props.recording.beat) return resolved.text ?? ''
+  const { beat: name, option } = parseTakeKey(props.recording.beat)
+  // a hook or CTA's other wording, or one wording of a VO beat
+  if (!name) return resolved.alternates[option - 2] ?? ''
+  const beat = resolved.beats?.find(entry => entry.beat === name)
+  return beat ? beatWordings(beat)[option - 1]?.script ?? '' : ''
 })
 // a voiceover's length is checked against its script, at the speech pace in Settings
 const { settings } = useRefData()
@@ -34,7 +39,7 @@ const expectedSeconds = computed(() => isVoiceover(first.value)
   : 0)
 const label = computed(() => {
   const person = props.bundle.people.find(p => p.id === first.value.person_id)?.name ?? ''
-  return `${props.recording.code}${props.recording.beat ? ` ${props.recording.beat}` : ''} for ${person}`
+  return `${props.recording.code}${props.recording.beat ? ` ${takeLabel(props.recording.beat)}` : ''} for ${person}`
 })
 </script>
 

@@ -9,7 +9,13 @@ import { parseTakeKey, slugify } from './slots'
 import { sha256Hex } from './sha256'
 
 /** The contract version this code implements (docs/contract.md, top line). */
-export const KLIP_CONTRACT_VERSION = 2
+export const KLIP_CONTRACT_VERSION = 3
+/**
+ * Index versions Kreate reads. Version 3 only added the spots of a hook's or CTA's other wordings
+ * (§3): the index itself is unchanged, so a version 2 index still reads (a Klip that old leaves
+ * those takes unedited, and Check edits says so).
+ */
+export const KLIP_INDEX_VERSIONS = [2, 3] as const
 
 // --- takes and their roles (§3) ----------------------------------------------------------
 
@@ -131,7 +137,7 @@ const KlipBrollSchema = z.object({
 })
 
 export const KlipIndexSchema = z.object({
-  schema_version: z.literal(KLIP_CONTRACT_VERSION),
+  schema_version: z.union([z.literal(2), z.literal(3)]),
   klip_version: z.string(),
   plan_hash: z.string(),
   shoot: z.string(),
@@ -152,7 +158,7 @@ export type KlipBroll = z.infer<typeof KlipBrollSchema>
  */
 export function parseKlipIndex(json: unknown): { index: KlipIndex, error?: undefined } | { index?: undefined, error: string } {
   const version = (json as { schema_version?: unknown } | null)?.schema_version
-  if (version !== KLIP_CONTRACT_VERSION) {
+  if (!(KLIP_INDEX_VERSIONS as readonly unknown[]).includes(version)) {
     return { error: `Klip's index (edited/_klip.json) is contract version ${String(version ?? 'unknown')}; Kreate reads version ${KLIP_CONTRACT_VERSION}. Update Klip or Kreate so they match.` }
   }
   const parsed = KlipIndexSchema.safeParse(json)

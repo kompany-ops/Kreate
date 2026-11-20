@@ -278,7 +278,7 @@ async function writeCta() {
 
 /** Shared fields (channel, location) apply to everyone's item. */
 /** Shared by everyone filming a group: channel, location, or (edit for everyone) the shoot's own copy of the script. */
-async function updateGroup(group: ShotGroup, patch: { channel_id?: string | null, location?: string | null, script_snapshot?: string | Beat[] }) {
+async function updateGroup(group: ShotGroup, patch: { channel_id?: string | null, location?: string | null, script_snapshot?: string | Beat[], alternates?: string[] }) {
   await run(async () => {
     must(await db.from('shoot_items').update(patch as Update<'shoot_items'>).in('id', group.items.map(item => item.id)))
     for (const item of group.items) Object.assign(item, patch)

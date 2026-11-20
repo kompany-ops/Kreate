@@ -2020,6 +2020,7 @@ export type Database = {
       }
       shoot_items: {
         Row: {
+          alternates: string[]
           body_template_id: string | null
           caption: string | null
           channel_id: string | null
@@ -2044,6 +2045,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          alternates?: string[]
           body_template_id?: string | null
           caption?: string | null
           channel_id?: string | null
@@ -2068,6 +2070,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          alternates?: string[]
           body_template_id?: string | null
           caption?: string | null
           channel_id?: string | null

@@ -92,6 +92,9 @@ const beatInput = z.object({
 })
 type BeatInput = z.infer<typeof beatInput>
 
+const wordingsArg = z.array(z.string().min(1).max(1000)).max(5).optional()
+  .describe('Other wordings of the line, each filmed as its own take (H01-2, H01-3…) and mixed into extra versions up to the shoot’s wording mixes')
+
 export function registerShootTools(kit: ShootToolKit) {
   const { server, guarded, text, failure, link, paths, pace, organisationArg } = kit
   const shootArg = z.string().min(2).max(10).describe('The shoot code, e.g. S008')
@@ -153,6 +156,8 @@ export function registerShootTools(kit: ShootToolKit) {
           written_here: first.home === 'shoot',
           location: first.location,
           script: script.beats ? script.beats.map(beat => ({ beat: beat.beat, script: beat.script })) : script.text,
+          // a hook or CTA's other wordings, each filmed as its own take (H01-2…)
+          other_wordings: script.alternates.length ? script.alternates : undefined,
           unfilled_slots: script.unfilled.length ? script.unfilled : undefined,
           people: [...new Set(group.items.map(item => personName(item.person_id)).filter(Boolean))],
           filmed: group.items.filter(item => item.status === 'filmed').length || undefined,
@@ -309,16 +314,17 @@ export function registerShootTools(kit: ShootToolKit) {
         script: z.string().min(1).max(500),
         caption: z.string().max(500).optional().describe('A suggested post caption'),
         filming_notes: z.string().max(1000).optional().describe('How to film it'),
-        hook_type: z.string().max(80).optional().describe('A hook type name from get_workspace')
+        hook_type: z.string().max(80).optional().describe('A hook type name from get_workspace'),
+        other_wordings: wordingsArg
       })).max(20).optional().describe('Hooks written just for this shoot'),
-      new_ctas: z.array(z.object({ script: z.string().min(1).max(500), mode: z.enum(['sync', 'vo']).describe('sync: said on camera; vo: voiceover over footage') })).max(20).optional()
+      new_ctas: z.array(z.object({ script: z.string().min(1).max(500), mode: z.enum(['sync', 'vo']).describe('sync: said on camera; vo: voiceover over footage'), other_wordings: wordingsArg })).max(20).optional()
         .describe('CTAs written just for this shoot'),
       organisation: organisationArg
     }),
     annotations: { readOnlyHint: false, destructiveHint: false }
   }, guarded(async (input: {
     shoot: string, hook_ids?: string[], vo_ids?: string[], cta_ids?: string[],
-    new_hooks?: { script: string, caption?: string, filming_notes?: string, hook_type?: string }[], new_ctas?: { script: string, mode: 'sync' | 'vo' }[], organisation?: string
+    new_hooks?: { script: string, caption?: string, filming_notes?: string, hook_type?: string, other_wordings?: string[] }[], new_ctas?: { script: string, mode: 'sync' | 'vo', other_wordings?: string[] }[], organisation?: string
   }, org, db) => {
     const bundle = await loadShoot(db, input.shoot)
     requireDraft(bundle, 'its shot list')
@@ -357,7 +363,18 @@ export function registerShootTools(kit: ShootToolKit) {
     }
     if (!hooks.length && !ctas.length && !vos.length) return failure('Nothing to add: pass ids or new hooks / CTAs.')
     const added = await addToShotList(db, bundle, { hooks, bodies: vos, ctas })
-    const after = await loadShoot(db, bundle.shoot.code)
+    let after = await loadShoot(db, bundle.shoot.code)
+    // new hooks' and CTAs' other wordings, by their line
+    const wordings = [
+      ...(input.new_hooks ?? []).map(hook => ({ kind: 'hook', script: hook.script.trim(), others: hook.other_wordings ?? [] })),
+      ...(input.new_ctas ?? []).map(cta => ({ kind: 'cta', script: cta.script.trim(), others: cta.other_wordings ?? [] }))
+    ].filter(entry => entry.others.length)
+    for (const entry of wordings) {
+      const template = [...hooks, ...ctas].find(row => row.script === entry.script && row.shoot_id === bundle.shoot.id)
+      const group = groupShotList(after.items).find(other => other.kind === entry.kind && other.template_id === template?.id)
+      if (group) await setAlternates(db, after, group, entry.others)
+    }
+    if (wordings.length) after = await loadShoot(db, bundle.shoot.code)
     return text({
       added: added.map(entry => ({ code: entry.code, kind: entry.kind === 'body' ? 'vo' : entry.kind })),
       already_on: hooks.length + ctas.length + vos.length > added.length ? 'Some were already on the shot list.' : undefined,
@@ -370,13 +387,14 @@ export function registerShootTools(kit: ShootToolKit) {
 
   server.registerTool('edit_shot_list', {
     title: 'Edit shot list',
-    description: 'Change entries on a shoot\'s shot list, by code (H01, V02, C01): where it\'s filmed, its wording for everyone on this shoot, one person\'s own wording, and, for a hook or CTA, its wording in the Library for good or keeping one written here for the product\'s later shoots. A VO\'s own wording, channel and alternates change with update_vo.',
+    description: 'Change entries on a shoot\'s shot list, by code (H01, V02, C01): where it\'s filmed, its wording for everyone on this shoot, one person\'s own wording, and, for a hook or CTA, its other wordings on a draft (each filmed as its own take, H01-2…, and mixed into extra versions up to the shoot\'s wording mixes), its wording in the Library for good, or keeping one written here for the product\'s later shoots. A VO\'s own wording, channel and alternates change with update_vo.',
     inputSchema: z.object({
       shoot: shootArg,
       entries: z.array(z.object({
         code: z.string().min(2).max(10),
         location: z.string().max(200).nullable().optional().describe('Where it\'s filmed (null clears)'),
         script: z.string().min(1).max(1000).optional().describe('Hooks and CTAs: the line for everyone on this shoot only'),
+        other_wordings: wordingsArg.describe('Hooks and CTAs on a draft: every other wording of the line, replacing the ones it has ([] removes them)'),
         beats: z.array(z.object({ beat: z.string().max(60), script: z.string().min(1).max(1000) })).max(20).optional().describe('VOs: every beat\'s line for everyone on this shoot only'),
         library_script: z.string().min(1).max(1000).optional().describe('Hooks and CTAs: change the line in the Library itself (every shoot that uses it later)'),
         keep_for_product: z.boolean().optional().describe('A hook or CTA written here: keep it in the Library for this product\'s later shoots'),
@@ -392,7 +410,7 @@ export function registerShootTools(kit: ShootToolKit) {
     annotations: { readOnlyHint: false, destructiveHint: false }
   }, guarded(async ({ shoot: code, entries }: {
     shoot: string
-    entries: { code: string, location?: string | null, script?: string, beats?: { beat: string, script: string }[], library_script?: string, keep_for_product?: boolean,
+    entries: { code: string, location?: string | null, script?: string, other_wordings?: string[], beats?: { beat: string, script: string }[], library_script?: string, keep_for_product?: boolean,
       person_wording?: { person: string, channel?: string, script?: string | null, beats?: { beat: string, script: string }[] | null }[] }[]
     organisation?: string
   }, org, db) => {
@@ -418,6 +436,13 @@ export function registerShootTools(kit: ShootToolKit) {
         if (isVo) throw new Error(`${group.code} is a VO: give its beats instead of a script.`)
         check(await db.from('shoot_items').update({ script_snapshot: entry.script.trim() }).in('id', ids(group)))
         done.push(`${group.code}: wording for everyone`)
+      }
+      if (entry.other_wordings !== undefined) {
+        if (isVo) throw new Error(`${group.code} is a VO: its beats' other wordings change with update_vo.`)
+        requireDraft(bundle, `${group.code}'s wordings`)
+        const fresh = await loadShoot(db, bundle.shoot.code)
+        const set = await setAlternates(db, fresh, findGroup(fresh, group.code), entry.other_wordings)
+        done.push(`${group.code}: ${set.length ? `${set.length + 1} wordings` : 'one wording'}`)
       }
       if (entry.beats !== undefined) {
         if (!isVo) throw new Error(`${group.code} is a ${KIND_WORDS[group.kind]}: give a script instead of beats.`)

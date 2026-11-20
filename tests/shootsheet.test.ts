@@ -16,6 +16,7 @@ import {
   planSnapshots,
   resolveItemScript,
   skeletonFiles,
+  takeLabel,
   takeSpot,
   unfilledItems,
   usedByRecipes
@@ -153,6 +154,7 @@ describe('planSnapshots', () => {
       id: 'i1',
       script_snapshot: 'Nobody told me Calming Chews could do this for my Doberman',
       script_override: null,
+      alternates: [],
       caption: 'my Doberman and Calming Chews: calmer walks'
     })
     expect(frozen[2]!.script_snapshot).toEqual([
@@ -160,7 +162,7 @@ describe('planSnapshots', () => {
       { beat: 'product', script: 'PawCo Calming Chews' },
       { beat: 'result', script: 'calmer walks' }
     ])
-    expect(frozen[3]).toEqual({ id: 'i4', script_snapshot: 'Template CTA', script_override: 'Grab Calming Chews, "today"', caption: null })
+    expect(frozen[3]).toEqual({ id: 'i4', script_snapshot: 'Template CTA', script_override: 'Grab Calming Chews, "today"', alternates: [], caption: null })
 
     // apply, then change the product: the planned shoot renders exactly as before
     b.items.forEach((item, index) => Object.assign(item, frozen[index]))
@@ -174,7 +176,7 @@ describe('planSnapshots', () => {
 describe('buildShootsheet', () => {
   it('matches the worker contract', () => {
     const sheet = buildShootsheet(bundle())
-    expect(sheet.schema_version).toBe(10)
+    expect(sheet.schema_version).toBe(11)
     // custom slots are the shoot's own
     expect(sheet.shoot.slot_values).toEqual({ benefit: 'calmer walks' })
     expect(sheet.shoot).toMatchObject({ code: 'S014', date: '2026-10-20', broll_variations: 3, submission_rate: 0.15 })
@@ -194,7 +196,8 @@ describe('buildShootsheet', () => {
       hook_type: 'curiosity', script: 'Nobody told me Calming Chews could do this for my Doberman',
       caption: 'my Doberman and Calming Chews: calmer walks',
       file: 'pawco/calming-chews/shoots/S014/edited/topdognix/hooks/joe/H01',
-      raw_file: 'pawco/calming-chews/shoots/S014/raw/topdognix/hooks/joe/H01'
+      raw_file: 'pawco/calming-chews/shoots/S014/raw/topdognix/hooks/joe/H01',
+      alternates: []
     })
     expect(sheet.items[3]).toMatchObject({ kind: 'body', channel: 'topdognix', format: 'F02' })
     expect(sheet.items[0]).toMatchObject({ kind: 'cta', cta_mode: 'sync', channel: 'topdognix' })
@@ -237,7 +240,7 @@ describe('skeleton zip', () => {
     expect(folders).toEqual(expect.arrayContaining([`${shoot}/raw`, `${shoot}/edited`, `${shoot}/renders`]))
     // everything lives in the shoot folder
     expect(folders.every(folder => folder.startsWith(shoot))).toBe(true)
-    expect(JSON.parse(files[`${shoot}/manifest.json`]!)).toEqual({ schema_version: 11, version: 0, plan_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), generated_at: null, plan: sheet, clips: [] })
+    expect(JSON.parse(files[`${shoot}/manifest.json`]!)).toEqual({ schema_version: 12, version: 0, plan_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), generated_at: null, plan: sheet, clips: [] })
   })
 
   it('files b-roll for a product feature a level down in its beat folder', () => {
@@ -423,5 +426,27 @@ describe('clipSpotInfo', () => {
     b.broll[0] = { ...b.broll[0]!, id: 's1' }
     expect(clipSpotInfo(b, 'broll:s1:c2:0')).toEqual({ shot: 'broll:s1', label: 'b-roll "anxious pacing" · topdogwhiskey' })
     expect(clipSpotInfo(b, 'item:nope')).toBeNull()
+  })
+})
+
+describe('hook and CTA wordings', () => {
+  it('films each wording as its own take beside the first, with its slots filled', () => {
+    const b = bundle()
+    const hook = b.items.find(item => item.code === 'H01' && item.channel_id === 'c1')!
+    hook.alternates = ['{{dog}} changed my mornings']
+    expect(itemBeats(hook)).toEqual([null, '~2'])
+    expect(takeSpot(b, hook, '~2')).toBe('topdognix/hooks/joe/H01-2')
+    expect(takeLabel('~2')).toBe('wording 2')
+    expect(resolveItemScript(b, hook).alternates).toEqual(['my Doberman changed my mornings'])
+    expect(planSnapshots(b).find(entry => entry.id === hook.id)!.alternates).toEqual(['my Doberman changed my mornings'])
+    const sheet = buildShootsheet(b)
+    expect(sheet.items.find(item => item.code === 'H01' && item.channel === 'topdognix')).toMatchObject({
+      alternates: [{
+        option: 2,
+        script: 'my Doberman changed my mornings',
+        file: 'pawco/calming-chews/shoots/S014/edited/topdognix/hooks/joe/H01-2',
+        raw_file: 'pawco/calming-chews/shoots/S014/raw/topdognix/hooks/joe/H01-2'
+      }]
+    })
   })
 })

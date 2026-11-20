@@ -159,12 +159,16 @@ const progress = computed(() => {
 
 /** Lines where someone has their own wording, for the everyone view. */
 const ownVersions = (group: ShotGroup) => group.items.filter(item => item.script_override !== null && item.script_override !== undefined)
+/** own wordings are of a hook or CTA's first wording: its other wordings are everyone's */
+const ownVersionsOf = (shot: Shot) => shot.take && !parseTakeKey(shot.take).beat ? [] : ownVersions(shot.group)
 const script = (item: BundleItem) => resolveItemScript(bundle.value, item)
 /** A shot's line across every channel it's filmed for: a channel slot reads "my Vizsla / our two dogs". */
 function shotLine(shot: Shot) {
   const versions = shot.group.items.map(item => script({ ...item, script_override: null }))
   if (shot.take === null) return { text: mergeVariants(versions.map(version => version.text ?? '')), show: null, hookType: shot.group.items[0]!.hook_type }
   const { beat: name, option } = parseTakeKey(shot.take)
+  // a hook or CTA's other wording
+  if (!name) return { text: mergeVariants(versions.map(version => version.alternates[option - 2] ?? '')), show: null, hookType: shot.group.items[0]!.hook_type }
   const wording = (beats: { beat: string, script: string }[] | null | undefined) => {
     const beat = (beats ?? []).find(entry => entry.beat === name) as Parameters<typeof beatWordings>[0] | undefined
     return beat ? beatWordings(beat)[option - 1] : undefined
@@ -181,6 +185,8 @@ function ownLine(item: BundleItem, take: string | null) {
   const resolved = script(item)
   if (take === null) return resolved.text ?? ''
   const { beat: name, option } = parseTakeKey(take)
+  // a hook or CTA's other wordings are everyone's: own wordings are of the first
+  if (!name) return resolved.alternates[option - 2] ?? ''
   const beat = resolved.beats?.find(entry => entry.beat === name)
   return beat ? beatWordings(beat)[option - 1]?.script ?? '' : ''
 }
@@ -594,7 +600,7 @@ function skipBroll(shot: Row<'broll_shots'>) {
             <UIcon name="i-lucide-video" class="mt-0.5 shrink-0 text-muted" />
             <span><span class="font-medium">How to film:</span> {{ shot.group.items[0]!.filming_notes }}</span>
           </p>
-          <p v-for="item in person ? [] : ownVersions(shot.group)" :key="`own-${item.id}`" class="text-sm text-muted">
+          <p v-for="item in person ? [] : ownVersionsOf(shot)" :key="`own-${item.id}`" class="text-sm text-muted">
             <span class="font-medium text-default">{{ personName(item.person_id) }}'s version:</span>
             {{ ownLine(item, shot.take) }}
           </p>

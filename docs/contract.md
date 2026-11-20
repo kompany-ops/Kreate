@@ -1,6 +1,6 @@
 # Kreate ↔ Klip contract
 
-contract_version: 2
+contract_version: 3
 
 Agreed 2026-11-15 · reviewed by Kreate (kreate-47), decisions by Joe · not yet implemented on either side
 
@@ -30,16 +30,16 @@ Every filmed take is filmed on camera, VO beats included. A VO beat shown as `sc
 
 Klip finds the takes from `manifest.json` → `plan.items`, at the spot Kreate's `takeSpot()` gives, relative to `raw/` and `edited/`:
 
-- hook: `<channel>/hooks/<person>/<code>`
-- CTA: `<channel>/ctas/<person>/<code>`
+- hook: `<channel>/hooks/<person>/<code>`; its other wordings (the plan item's `alternates`, each with its `option`) are `<code>-<option>` beside it
+- CTA: `<channel>/ctas/<person>/<code>`; its other wordings likewise `<code>-<option>`
 - VO beat: `<channel>/vo/<person>/<beat folder>/<code>`, where the beat folder is `slugify(beat name)`; wordings 2+ are `<code>-<option>`
 
 Each take's **role** sets the editing rules Klip applies (length, camera move, sound effect, captions):
 
 | Take | Role |
 |---|---|
-| a hook item | `hook` |
-| a CTA item | `cta` |
+| a hook item (every wording) | `hook` |
+| a CTA item (every wording) | `cta` |
 | a standalone VO's beat named `hook` | `hook` |
 | a standalone VO's beat named `cta` | `cta` |
 | any other VO beat shown `face`, `broll` or `voice_note` | `beat` |
@@ -109,7 +109,7 @@ Klip's index of everything it made. Written after every take, atomically (write 
 ```ts
 interface KlipIndex {
   /** always this document's contract_version */
-  schema_version: 2
+  schema_version: 3
   /** Klip's own version, for support */
   klip_version: string
   /** the manifest's `plan_hash` Klip worked from (§7) */
@@ -179,6 +179,8 @@ interface KlipBroll {
 
 Lengths come from `duration` in the index.
 
+**Other wordings** (version 3): a hook or CTA in the plan can carry `alternates`, its other wordings, each a take of its own at `<code>-<option>` (§3) with the hook's or CTA's role. In the manifest each is a take clip with `option` 2, 3…; in `recipes.json` (version 4) `hook.option` and `cta.option` say which wording a recipe uses, and recipe IDs name it `<code>-<option>`. The index is unchanged, so Kreate still reads a version 2 index: a Klip that old leaves those takes unedited, and Check edits reports them (at no spot).
+
 **The manifest** (`TakeClip`): `file` is the `clip` block. `caption` and `sidecars` are replaced by `blocks` (the `files` map minus `clip`) and `text`. `MANIFEST_SCHEMA_VERSION` goes to 11.
 
 **Treatments in the plan**: `sidecar` and `applies_to` go. Kreate derives ingredients from `component` (§5).
@@ -221,5 +223,6 @@ Captions are always laid on last, over whatever picture plays, unless the treatm
 - **Product-page backdrop** (Joe, 2026-11-15): greenscreen uses b-roll for now. `product_page` waits for a product image upload in Kreate.
 - **Retro captions**: a second captions block, which keeps Klip's emphasis and corrections.
 - **Master copy**: identical copies in both repos plus the shared example, with drift tests.
+- **Hook and CTA wordings** (Joe, 2026-11-20, version 3): a hook or CTA can have more than one wording on a shoot, each filmed as its own take at `<code>-<option>`, mixed into recipes up to the shoot's wording mixes and scored as one hook or CTA.
 
 No open questions.

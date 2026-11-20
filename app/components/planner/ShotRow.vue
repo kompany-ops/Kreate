@@ -10,7 +10,8 @@ import type { Beat } from '#shared/utils/slots'
 // rewrites the shoot's own copy of the line (every person's snapshot): this shoot only, never
 // the library, and own versions stay on top of it. "Permanently" (hooks and CTAs) edits the
 // Library template itself, for later shoots, and updates this shoot's copy to match. A VO's
-// "The VO" opens it in the VO editor (it's written in the shoot).
+// "The VO" opens it in the VO editor (it's written in the shoot). A hook or CTA can have more
+// wordings on a draft (for everyone, each filmed as its own take: H01-2…), as a VO's beats can.
 const props = defineProps<{
   group: ShotGroup
   bundle: LoadedShoot
@@ -18,7 +19,7 @@ const props = defineProps<{
   productId: string
 }>()
 const emit = defineEmits<{
-  updateGroup: [patch: { channel_id?: string | null, location?: string | null, script_snapshot?: string | Beat[] }]
+  updateGroup: [patch: { channel_id?: string | null, location?: string | null, script_snapshot?: string | Beat[], alternates?: string[] }]
   remove: []
   updateItem: [item: BundleItem, patch: { channel_id?: string | null, location?: string | null, script_override?: string | Beat[] | null, script_snapshot?: string | Beat[] }]
   editVo: []
@@ -35,6 +36,9 @@ const beats = computed(() => {
   return versions[0]!.map((beat, index) => ({ beat: beat.beat, script: mergeVariants(versions.map(version => version[index]?.script ?? '')) }))
 })
 const text = computed(() => mergeVariants(props.group.items.map(item => typeof item.script_snapshot === 'string' ? item.script_snapshot : '')))
+/** a hook or CTA's other wordings, for everyone (wording 2, 3…) */
+const alternates = computed(() => primary.value.kind === 'body' ? [] : primary.value.alternates ?? [])
+const MAX_WORDINGS = MAX_ALTERNATES + 1
 /** a VO's lines to show: every wording of each beat (alternates are their own takes), with hook types */
 const wordingLines = computed(() => {
   if (primary.value.kind !== 'body') return []
@@ -79,10 +83,12 @@ function saveLocation() {
 const editingAll = ref(false)
 const allText = ref('')
 const allBeats = ref<Beat[]>([])
+const allAlternates = ref<string[]>([])
 
-function startEditAll() {
+function startEditAll(addWording = false) {
   allText.value = text.value
   allBeats.value = beats.value.map(beat => ({ ...beat }))
+  allAlternates.value = [...alternates.value, ...(addWording ? [''] : [])]
   editingLibrary.value = false
   editingAll.value = true
 }
@@ -92,11 +98,14 @@ const canSaveAll = computed(() => primary.value.kind === 'body'
   : !!allText.value.trim())
 
 function saveAll() {
-  emit('updateGroup', {
-    script_snapshot: primary.value.kind === 'body'
-      ? allBeats.value.map(beat => ({ beat: beat.beat, script: beat.script.trim() }))
-      : allText.value.trim()
-  })
+  if (primary.value.kind === 'body') {
+    emit('updateGroup', { script_snapshot: allBeats.value.map(beat => ({ beat: beat.beat, script: beat.script.trim() })) })
+  } else {
+    const line = allText.value.trim()
+    // wordings are frozen once planned; empty and repeated ones are dropped
+    const others = [...new Set(allAlternates.value.map(wording => wording.trim()).filter(wording => wording && wording !== line))]
+    emit('updateGroup', { script_snapshot: line, ...(props.draft ? { alternates: others } : {}) })
+  }
   editingAll.value = false
 }
 
@@ -166,7 +175,10 @@ const editItems = computed<DropdownMenuItem[]>(() => [
   ...(primary.value.home === 'shoot'
     ? [{ label: `Save to ${props.bundle.product.name}`, description: 'Keep it in the Library for this product\'s later shoots', icon: 'i-lucide-bookmark-plus', onSelect: saveToProduct }]
     : []),
-  { label: 'For everyone', icon: 'i-lucide-pencil', onSelect: startEditAll },
+  { label: 'For everyone', icon: 'i-lucide-pencil', onSelect: () => startEditAll() },
+  ...(props.draft && alternates.value.length < MAX_ALTERNATES
+    ? [{ label: 'Add a wording', description: 'Another way to say it, filmed as its own take', icon: 'i-lucide-list-plus', onSelect: () => startEditAll(true) }]
+    : []),
   {
     label: expanded.value ? 'Hide per person' : 'Per person',
     icon: 'i-lucide-users',
@@ -213,7 +225,31 @@ const editItems = computed<DropdownMenuItem[]>(() => [
               <ScriptEditor v-model="beat.script" />
             </UFormField>
           </template>
-          <ScriptEditor v-else v-model="allText" />
+          <template v-else>
+            <UFormField :label="alternates.length || allAlternates.length ? 'Wording 1' : undefined" size="xs">
+              <ScriptEditor v-model="allText" />
+            </UFormField>
+            <template v-if="draft">
+              <UFormField v-for="(_, index) in allAlternates" :key="index" :label="`Wording ${index + 2}`" size="xs">
+                <div class="flex items-start gap-1">
+                  <ScriptEditor v-model="allAlternates[index]" class="flex-1" />
+                  <UButton icon="i-lucide-x" size="xs" color="neutral" variant="ghost" aria-label="Remove this wording" @click="allAlternates.splice(index, 1)" />
+                </div>
+              </UFormField>
+              <UButton
+                v-if="allAlternates.length + 1 < MAX_WORDINGS"
+                label="Add a wording"
+                icon="i-lucide-plus"
+                size="xs"
+                color="neutral"
+                variant="link"
+                @click="allAlternates.push('')"
+              />
+              <p v-if="allAlternates.length" class="text-xs text-muted">
+                Each wording is filmed as its own take ({{ group.code }}-2…) and mixed into extra versions, up to the shoot's Wording mixes.
+              </p>
+            </template>
+          </template>
           <p class="text-xs text-muted">
             Changes this line for everyone on this shoot only; the library isn't touched.<template v-if="overrides">
               {{ overrides }} own version{{ overrides === 1 ? '' : 's' }} stay{{ overrides === 1 ? 's' : '' }} as {{ overrides === 1 ? 'it is' : 'they are' }}.
@@ -231,9 +267,16 @@ const editItems = computed<DropdownMenuItem[]>(() => [
             <UBadge v-if="line.hook_type" :label="line.hook_type" color="neutral" variant="subtle" size="sm" class="ml-1 align-middle" />
           </p>
         </template>
-        <p v-else class="text-sm text-highlighted">
-          <ScriptPreview :text="text" :context="context" />
-        </p>
+        <template v-else>
+          <p class="text-sm text-highlighted">
+            <span v-if="alternates.length" class="mr-1 text-xs font-medium text-muted uppercase">1</span>
+            <ScriptPreview :text="text" :context="context" />
+          </p>
+          <p v-for="(wording, index) in alternates" :key="index" class="text-sm text-highlighted">
+            <span class="mr-1 text-xs font-medium text-muted uppercase">{{ index + 2 }}</span>
+            <ScriptPreview :text="wording" :context="context" />
+          </p>
+        </template>
         <p v-if="primary.filming_notes" class="flex items-start gap-1 text-xs text-muted">
           <UIcon name="i-lucide-video" class="mt-0.5 shrink-0" />{{ primary.filming_notes }}
         </p>
