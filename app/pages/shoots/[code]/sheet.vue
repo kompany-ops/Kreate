@@ -38,12 +38,15 @@ const waitingToStart = computed(() => !isAdmin.value && ['draft', 'planned'].inc
 const person = computed(() => isAdmin.value ? bundle.value.people.find(p => p.slug === route.query.person) ?? null : mine.value)
 type Show = 'all' | 'hook' | 'cta' | 'body' | 'broll'
 const show = computed<Show>(() => (['hook', 'cta', 'body', 'broll'] as const).find(value => value === route.query.show) ?? 'all')
-function setFilter(next: { person?: string | null, show?: Show }) {
+/** only what's still to film (or skip): ?left=1 */
+const notDone = computed(() => route.query.left === '1')
+function setFilter(next: { person?: string | null, show?: Show, left?: boolean }) {
   const query: Record<string, string> = {}
   const slug = next.person === undefined ? person.value?.slug : next.person
   const kind = next.show ?? show.value
   if (slug) query.person = slug
   if (kind !== 'all') query.show = kind
+  if (next.left ?? notDone.value) query.left = '1'
   router.replace({ query })
 }
 const setPerson = (slug: string | null) => setFilter({ person: slug })
@@ -103,6 +106,7 @@ const visibleShots = computed(() => show.value === 'broll' ? [] : allShots.value
 const visibleItems = computed(() => [...new Set(visibleShots.value.flatMap(shot => shot.group.items))])
 const showBroll = computed(() => show.value === 'all' || show.value === 'broll')
 
+
 /** A take is done once its clip is saved for every channel it fills (or the person skipped it). */
 const takeDone = (take: Recording) => take.items.every(item => item.status === 'skipped' || taken(clipTarget.item(item.id, take.beat)))
 
@@ -126,9 +130,10 @@ const sections = computed(() => ([
   { section: 'cta' as const, title: 'CTAs', hint: '' },
   { section: 'body' as const, title: 'VOs', hint: 'One beat at a time' }
 ])
-  .map(entry => ({ ...entry, shots: visibleShots.value.filter(shot => shot.section === entry.section) }))
+  .map(entry => ({ ...entry, all: visibleShots.value.filter(shot => shot.section === entry.section) }))
+  .map(entry => ({ ...entry, shots: entry.all.filter(shot => stillToDo(shot.key, shotDone(shot))) }))
   .filter(entry => entry.shots.length)
-  .map(entry => ({ ...entry, done: entry.shots.filter(shotDone).length, total: entry.shots.length })))
+  .map(entry => ({ ...entry, done: entry.all.filter(shotDone).length, total: entry.all.length })))
 
 /**
  * Every channel films its own clips of a b-roll shot: a shared shot (no channel) is filmed for
@@ -142,13 +147,20 @@ const brollChannels = (shot: Row<'broll_shots'>): { id: string | null, name: str
     .filter(channel => !person.value || !channel.id || bundle.value.channelPeople?.[channel.id]?.includes(person.value.id))
 const visibleBroll = computed(() => notOnShoot.value ? [] : bundle.value.broll.filter(shot => brollChannels(shot).length))
 
+// "Not done" hides what's finished. A shot worked on while it's on stays until it's switched
+// again, so a clip just added (or a skip) doesn't vanish before you've seen it.
+const workedOn = ref(new Set<string>())
+watch(notDone, () => { workedOn.value = new Set() })
+const keep = (key: string) => { if (notDone.value) workedOn.value.add(key) }
+const stillToDo = (key: string, done: boolean) => !notDone.value || !done || workedOn.value.has(key)
+
 /** B-roll by beat. */
 const brollGroups = computed(() => {
   const beats = [...new Set(visibleBroll.value.map(shot => shot.beat))]
   return beats.map(beat => ({
     title: beat,
-    shots: visibleBroll.value.filter(shot => shot.beat === beat).sort((a, b) => a.sort_order - b.sort_order)
-  }))
+    shots: visibleBroll.value.filter(shot => shot.beat === beat && stillToDo(shot.id, shot.status === 'skipped' || brollDoneInView(shot))).sort((a, b) => a.sort_order - b.sort_order)
+  })).filter(group => group.shots.length)
 })
 
 /** Ticked off out of what's showing (b-roll counts when it's on screen). */
@@ -244,6 +256,7 @@ function syncTake(take: Recording) {
 
 /** Skip (or unskip) one person's whole entry: every channel and beat of it. */
 function toggleSkip(items: BundleItem[]) {
+  if (!isAdmin.value) return
   const unskip = items.every(item => item.status === 'skipped')
   for (const item of items) {
     if (item.status === 'filmed') continue
@@ -265,6 +278,15 @@ const nextBrollSlot = (shot: Row<'broll_shots'>, channelId: string | null) => {
   return Array.from({ length: MAX_BROLL_CLIPS }, (_, index) => index).find(index => !used.includes(index)) ?? null
 }
 const brollDone = (shot: Row<'broll_shots'>) => allChannelIds(shot).every(channelId => brollSlots(shot, channelId).length >= clipsNeeded.value)
+/**
+ * A b-roll shot is filmed once every channel that uses it has its clips, so a shot can be done for
+ * the channels on screen (one person's) and still be waiting on another's: it shows green for what's
+ * in view, and names the channels still to film it.
+ */
+const brollChannelsShort = (shot: Row<'broll_shots'>) => allChannelIds(shot).filter(channelId => brollSlots(shot, channelId).length < clipsNeeded.value)
+const brollDoneInView = (shot: Row<'broll_shots'>) => shot.status === 'filmed'
+  || (shot.status !== 'skipped' && brollChannels(shot).every(channel => brollSlots(shot, channel.id).length >= clipsNeeded.value))
+const brollStillNeeded = (shot: Row<'broll_shots'>) => brollChannelsShort(shot).map(id => channelName(id) ?? 'every channel')
 const allChannelIds = (shot: Row<'broll_shots'>): (string | null)[] => brollChannelIds(bundle.value, shot as BrollShot)
 async function saveBroll(shot: Row<'broll_shots'>, patch: { status: string, clips_filmed: number }) {
   const ok = await run(async () => {
@@ -279,6 +301,7 @@ async function saveBroll(shot: Row<'broll_shots'>, patch: { status: string, clip
  * channel, on screen or not); the shot is filmed once every channel has one.
  */
 function brollClipChanged(shot: Row<'broll_shots'>) {
+  keep(shot.id)
   const next = allChannelIds(shot).reduce((sum, channelId) => sum + brollSlots(shot, channelId).length, 0)
   const status = shot.status === 'skipped' ? 'skipped' : brollDone(shot) ? 'filmed' : 'planned'
   saveBroll(shot, { clips_filmed: next, status })
@@ -370,6 +393,8 @@ watch(() => [uploadRequested.value, shootEnded.value, waitingClips.value.length]
 })
 
 function skipBroll(shot: Row<'broll_shots'>) {
+  if (!isAdmin.value) return
+  keep(shot.id)
   const skipped = shot.status === 'skipped'
   saveBroll(shot, {
     clips_filmed: shot.clips_filmed,
@@ -443,6 +468,16 @@ function skipBroll(shot: Row<'broll_shots'>) {
             <span class="text-xs tabular-nums opacity-70">{{ option.count }}</span>
           </template>
         </UButton>
+        <UButton
+          label="Not done"
+          icon="i-lucide-list-todo"
+          size="xs"
+          class="ml-auto shrink-0"
+          :color="notDone ? 'primary' : 'neutral'"
+          :variant="notDone ? 'soft' : 'ghost'"
+          :aria-pressed="notDone"
+          @click="setFilter({ left: !notDone })"
+        />
       </div>
     </header>
 
@@ -615,14 +650,15 @@ function skipBroll(shot: Row<'broll_shots'>) {
                 :class="row.filmed ? 'text-success' : 'text-muted'"
               />
               <span class="font-medium text-highlighted" :class="{ 'line-through': row.skipped }">{{ personName(row.person) }}</span>
+              <!-- only an admin skips (the database enforces it) -->
               <UButton
-                v-if="!row.filmed"
+                v-if="isAdmin && !row.filmed"
                 :label="`${row.skipped ? 'Unskip' : 'Skip'}${shot.group.kind === 'body' ? ` ${shot.group.code}` : ''}`"
                 size="xs"
                 color="neutral"
                 :variant="row.skipped ? 'solid' : 'ghost'"
                 class="ml-auto"
-                @click="toggleSkip(row.items)"
+                @click="keep(shot.key); toggleSkip(row.items)"
               />
             </div>
             <template v-if="!row.skipped">
@@ -635,8 +671,8 @@ function skipBroll(shot: Row<'broll_shots'>) {
                   :bundle="bundle"
                   :rules="clipRules"
                   :button-label="takeButtonLabel(take)"
-                  @saved="syncTake(take)"
-                  @removed="syncTake(take)"
+                  @saved="keep(shot.key); syncTake(take)"
+                  @removed="keep(shot.key); syncTake(take)"
                 />
               </div>
               <ChecklistTake
@@ -645,7 +681,7 @@ function skipBroll(shot: Row<'broll_shots'>) {
                 part="clip"
                 :recording="take"
                 :bundle="bundle"
-                @removed="syncTake(take)"
+                @removed="keep(shot.key); syncTake(take)"
               />
             </template>
           </div>
@@ -670,7 +706,7 @@ function skipBroll(shot: Row<'broll_shots'>) {
             :key="shot.id"
             class="rounded-lg border border-default px-3 py-2"
             :class="{
-              'border-success/40 bg-success/5': shot.status === 'filmed',
+              'border-success/40 bg-success/5': brollDoneInView(shot),
               'opacity-60': shot.status === 'skipped'
             }"
           >
@@ -680,14 +716,25 @@ function skipBroll(shot: Row<'broll_shots'>) {
                   {{ shot.description || 'Untitled shot' }}
                 </p>
                 <p class="text-xs text-muted">
-                  {{ shot.clips_filmed }}/{{ clipsNeeded * allChannelIds(shot).length }} clips<template v-if="allChannelIds(shot).length > 1">
-                    · {{ clipsNeeded }} per channel
-                  </template><template v-else-if="clipsNeeded > 1">
-                    · at least {{ clipsNeeded }}
+                  <template v-if="allChannelIds(shot).length > 1">
+                    {{ allChannelIds(shot).length - brollChannelsShort(shot).length }}/{{ allChannelIds(shot).length }} channels filmed<template v-if="clipsNeeded > 1">
+                      · {{ clipsNeeded }} clips each
+                    </template>
                   </template>
+                  <template v-else>
+                    {{ shot.clips_filmed }}/{{ clipsNeeded }} clip{{ clipsNeeded === 1 ? '' : 's' }}
+                  </template>
+                </p>
+                <p
+                  v-if="shot.status !== 'skipped' && brollStillNeeded(shot).length && brollStillNeeded(shot).length < allChannelIds(shot).length"
+                  class="text-xs"
+                  :class="brollDoneInView(shot) ? 'text-warning' : 'text-muted'"
+                >
+                  Still needed from {{ brollStillNeeded(shot).join(', ') }}
                 </p>
               </div>
               <UButton
+                v-if="isAdmin"
                 :label="shot.status === 'skipped' ? 'Unskip' : 'Skip'"
                 size="sm"
                 color="neutral"
@@ -734,12 +781,16 @@ function skipBroll(shot: Row<'broll_shots'>) {
       <template v-if="notOnShoot">
         You're not on this shoot's cast, so there's nothing for you to film.
       </template>
+      <template v-else-if="notDone && progress.total">
+        Everything here is done.
+        <UButton label="Show it all" variant="link" class="p-0" @click="setFilter({ left: false })" />
+      </template>
       <template v-else-if="show === 'all' && (!person || !isAdmin)">
         Nothing to film yet.
       </template>
       <template v-else>
         Nothing here for this filter.
-        <UButton label="Show everything" variant="link" class="p-0" @click="setFilter({ person: null, show: 'all' })" />
+        <UButton label="Show everything" variant="link" class="p-0" @click="setFilter({ person: null, show: 'all', left: false })" />
       </template>
     </p>
   </div>

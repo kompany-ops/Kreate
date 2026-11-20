@@ -1,5 +1,5 @@
--- Only the team ("admins" here) changes a shoot's status or runs its batches, and cast ("members")
--- can't film before the team starts the shoot. Raises on the first failure, and rolls everything back either way.
+-- Only the team ("admins" here) changes a shoot's status, runs its batches or skips shots, and
+-- cast ("members") can't film before the team starts the shoot. Raises on the first failure, and rolls everything back either way.
 -- Run it in the Supabase SQL editor, or with psql against the project.
 
 begin;
@@ -63,7 +63,7 @@ begin
     if sqlerrm like 'FAILED%' then raise; end if;
   end;
 
-  -- or film before it's started, though they can skip a shot
+  -- or film before it's started, or skip a shot
   if a_item is not null then
     begin
       update public.shoot_items set status = 'filmed' where id = a_item;
@@ -71,10 +71,21 @@ begin
     exception when raise_exception then
       if sqlerrm like 'FAILED%' then raise; end if;
     end;
-    update public.shoot_items set status = 'skipped' where id = a_item;
-    get diagnostics n = row_count;
-    if n <> 1 then raise exception 'FAILED: a member couldn''t skip a shot'; end if;
-    update public.shoot_items set status = 'planned' where id = a_item;
+    begin
+      update public.shoot_items set status = 'skipped' where id = a_item;
+      raise exception 'FAILED: a member skipped a shot';
+    exception when raise_exception then
+      if sqlerrm like 'FAILED%' then raise; end if;
+      if sqlerrm not like 'Only an admin can skip%' then raise exception 'FAILED: wrong error: %', sqlerrm; end if;
+    end;
+  end if;
+  if a_shot is not null then
+    begin
+      update public.broll_shots set status = 'skipped' where id = a_shot;
+      raise exception 'FAILED: a member skipped a b-roll shot';
+    exception when raise_exception then
+      if sqlerrm like 'FAILED%' then raise; end if;
+    end;
   end if;
 
   -- the same for b-roll and clips
@@ -110,6 +121,16 @@ begin
     -- codes are frozen once a shoot is planned: that's the draft rule, not the admin one
     if sqlerrm like 'Only an admin%' then raise exception 'FAILED: an admin couldn''t renumber'; end if;
   end;
+  if a_item is not null then
+    update public.shoot_items set status = 'skipped' where id = a_item;
+    get diagnostics n = row_count;
+    if n <> 1 then raise exception 'FAILED: an admin couldn''t skip a shot'; end if;
+    update public.shoot_items set status = 'planned' where id = a_item;
+  end if;
+  if a_shot is not null then
+    update public.broll_shots set status = 'skipped' where id = a_shot;
+    update public.broll_shots set status = 'planned' where id = a_shot;
+  end if;
   update public.shoots set status = 'shooting' where id = a_shoot;
   insert into public.shoot_shortlists (shoot_id, code, size, entry_ids) values (a_shoot, 'B99', 1, '{test}');
   update public.shoot_shortlists set status = 'rendering', status_at = now() where shoot_id = a_shoot and code = 'B99';
