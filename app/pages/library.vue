@@ -26,14 +26,21 @@ const allTabs = [
     help: 'A format is the structure of a VO: its beats and target length. Any CTA can follow any VO. VOs themselves are written in each shoot, for its product. Each format shows how many VOs are built on it.'
   },
   {
+    label: 'Statics',
+    value: 'statics',
+    icon: 'i-lucide-image',
+    help: 'Static ad formats: reusable structures for image ads (a Notes app screenshot, an offer-first banner…), each with its copy slots, the variants it can be made in (text, with the product, with a person), rules and example ads. Copy is written in each shoot, for its product, and Kanvas makes the ads.'
+  },
+  {
     label: 'Treatments',
     value: 'treatments',
     icon: 'i-lucide-wand-sparkles',
     help: 'Ways a finished video is presented: face to camera or over b-roll, a search bar, a text thread, greenscreen… Every one switched on is applied to every recipe that has what it needs, as an extra version.'
   }
 ]
-// treatments are how a creator's videos are cut: a brand account doesn't have them
-const tabs = isPublisher.value ? allTabs.filter(t => t.value !== 'treatments') : allTabs
+// treatments are how a creator's videos are cut, and static formats aren't shared with partners
+// yet: a brand account has neither
+const tabs = isPublisher.value ? allTabs.filter(t => t.value !== 'treatments' && t.value !== 'statics') : allTabs
 
 // Hooks has two views: the hook scripts, and the types they're tagged with
 const hookViews = [
@@ -110,6 +117,7 @@ const hookView = computed({
       </template>
       <LibraryCtas v-else-if="tab === 'ctas'" />
       <LibraryFormats v-else-if="tab === 'formats'" />
+      <LibraryStatics v-else-if="tab === 'statics'" />
       <LibraryTreatments v-else />
     </template>
   </UDashboardPanel>

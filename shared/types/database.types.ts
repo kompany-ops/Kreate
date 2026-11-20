@@ -369,6 +369,45 @@ export type Database = {
           },
         ]
       }
+      brand_kits: {
+        Row: {
+          brand_id: string
+          colors: Json
+          created_at: string
+          dropbox_path: string | null
+          fonts: Json
+          logos: Json
+          org_id: string
+          rules: Json
+          style_notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          brand_id: string
+          colors?: Json
+          created_at?: string
+          dropbox_path?: string | null
+          fonts?: Json
+          logos?: Json
+          org_id?: string
+          rules?: Json
+          style_notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          brand_id?: string
+          colors?: Json
+          created_at?: string
+          dropbox_path?: string | null
+          fonts?: Json
+          logos?: Json
+          org_id?: string
+          rules?: Json
+          style_notes?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       brands: {
         Row: {
           about: string | null
@@ -2311,6 +2350,27 @@ export type Database = {
           },
         ]
       }
+      shoot_static_formats: {
+        Row: {
+          created_at: string
+          org_id: string
+          shoot_id: string
+          static_format_id: string
+        }
+        Insert: {
+          created_at?: string
+          org_id?: string
+          shoot_id: string
+          static_format_id: string
+        }
+        Update: {
+          created_at?: string
+          org_id?: string
+          shoot_id?: string
+          static_format_id?: string
+        }
+        Relationships: []
+      }
       shoots: {
         Row: {
           broll_variations: number
@@ -2438,6 +2498,80 @@ export type Database = {
             columns: ["upload_requested_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      static_formats: {
+        Row: {
+          archived: boolean
+          code: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          mechanism: string | null
+          name: string
+          notes: string | null
+          org_id: string
+          plate: boolean
+          reference_images: Json
+          rules: Json
+          sizes: string[]
+          slots: Json
+          tags: string[]
+          text_render: string
+          updated_at: string
+          variants: string[]
+        }
+        Insert: {
+          archived?: boolean
+          code: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          mechanism?: string | null
+          name: string
+          notes?: string | null
+          org_id?: string
+          plate?: boolean
+          reference_images?: Json
+          rules?: Json
+          sizes?: string[]
+          slots?: Json
+          tags?: string[]
+          text_render?: string
+          updated_at?: string
+          variants?: string[]
+        }
+        Update: {
+          archived?: boolean
+          code?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          mechanism?: string | null
+          name?: string
+          notes?: string | null
+          org_id?: string
+          plate?: boolean
+          reference_images?: Json
+          rules?: Json
+          sizes?: string[]
+          slots?: Json
+          tags?: string[]
+          text_render?: string
+          updated_at?: string
+          variants?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "static_formats_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "orgs"
             referencedColumns: ["id"]
           },
         ]
