@@ -2291,6 +2291,7 @@ export type Database = {
           entry_ids: string[]
           exploit_share: number | null
           id: string
+          medium: string
           manifest_version: number | null
           org_id: string
           shoot_id: string
@@ -2306,6 +2307,7 @@ export type Database = {
           entry_ids: string[]
           exploit_share?: number | null
           id?: string
+          medium?: string
           manifest_version?: number | null
           org_id?: string
           shoot_id: string
@@ -2321,6 +2323,7 @@ export type Database = {
           entry_ids?: string[]
           exploit_share?: number | null
           id?: string
+          medium?: string
           manifest_version?: number | null
           org_id?: string
           shoot_id?: string
@@ -2641,6 +2644,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      static_render_reviews: {
+        Row: {
+          decided_at: string
+          decided_by: string | null
+          decision: string
+          org_id: string
+          recipe_id: string
+          shortlist_id: string
+        }
+        Insert: {
+          decided_at?: string
+          decided_by?: string | null
+          decision: string
+          org_id?: string
+          recipe_id: string
+          shortlist_id: string
+        }
+        Update: {
+          decided_at?: string
+          decided_by?: string | null
+          decision?: string
+          org_id?: string
+          recipe_id?: string
+          shortlist_id?: string
+        }
+        Relationships: []
       }
       still_shots: {
         Row: {
@@ -3048,7 +3078,7 @@ export type Database = {
         Returns: undefined
       }
       renumber_shoot_items: { Args: { p_shoot_id: string }; Returns: undefined }
-      reset_batches: { Args: { p_shoot_id: string }; Returns: string[] }
+      reset_batches: { Args: { p_medium?: string; p_shoot_id: string }; Returns: string[] }
       revert_shoot: { Args: { p_shoot_id: string }; Returns: undefined }
       set_active_org: { Args: { p_org_id: string }; Returns: undefined }
       set_channel_members: {
@@ -3060,7 +3090,7 @@ export type Database = {
         Returns: undefined
       }
       sign_out_klip_everywhere: { Args: never; Returns: string }
-      undo_batch: { Args: { p_shoot_id: string }; Returns: string }
+      undo_batch: { Args: { p_medium?: string; p_shoot_id: string }; Returns: string }
       update_my_profile: {
         Args: { p_display_name: string; p_photo_url: string }
         Returns: undefined

@@ -7,6 +7,7 @@ import type { BundleItem, BundleTreatment, ShootBundle } from './shootsheet'
 import { STANDALONE_CTA_BEAT, STANDALONE_HOOK_BEAT, isStandalone, itemBeats, takeSpot } from './shootsheet'
 import { parseTakeKey, slugify } from './slots'
 import { sha256Hex } from './sha256'
+import { buildStaticPlan, staticPlanHashInput } from './kanvas'
 
 /** The contract version this code implements (docs/contract.md, top line). */
 export const KLIP_CONTRACT_VERSION = 3
@@ -99,7 +100,9 @@ export function planHash(bundle: ShootBundle): string {
     settings: treatment.settings ?? {},
     parts: (treatment.parts ?? []).map(part => ({ component: part.component, placement: part.placement, settings: part.settings ?? {} }))
   })).sort((a, b) => a.slug.localeCompare(b.slug))
-  return `sha256:${sha256Hex(JSON.stringify({ takes, treatments }))}`
+  // static ads (Kanvas): only when the shoot has them, so other shoots' hashes don't change
+  const statics = staticPlanHashInput(buildStaticPlan(bundle))
+  return `sha256:${sha256Hex(JSON.stringify(statics ? { takes, treatments, statics } : { takes, treatments }))}`
 }
 
 // --- Klip's index: edited/_klip.json (§6) ------------------------------------------------

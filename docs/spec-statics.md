@@ -2,7 +2,15 @@
 
 Adds **static ads** to Kreate: a Library of static formats, a design kit per brand, stills on the shoot checklist, static copy written per shoot, static recipes and static batches. Kanvas makes the ads; Kreate decides what gets made, as it does with Klip. This document adds to [spec.md](spec.md); section numbers in brackets point into it. When this is built, fold it into spec.md.
 
-*Draft, 2026-11-20. Nothing built yet.*
+*2026-11-20. Built: phases 1–4 (§11). Still to build: the connector tools (§9) and Kanvas licence and billing (§8).*
+
+**Settled while building:**
+- The Kanvas contract is [contract-kanvas.md](contract-kanvas.md) (version 1), copied to Kanvas's `docs/contract.md`; `tests/kanvasContract.test.ts` keeps them together.
+- Recipe assets are paths relative to the shoot folder: photos as filmed in `raw/…/stills/`, or a hook or CTA take in `edited/` for a frame. Kanvas maps photos to its own cut-outs, so recipes don't wait on Kanvas's prep.
+- A person's avatar stills are filed under the first of their channels on the shoot (by name) and used on all of them.
+- The person in a person variant is scored as `avatar`, not `person`, since hand-drops are kept per shoot and would otherwise mix with video's.
+- `manifest.json` → `plan.static` carries signed links (30 days) to the example ads and kit files; `plan_hash` covers the static plan without them, and only when the shoot has static formats.
+- Static copy is frozen once the shoot is planned. Brand accounts don't have the Statics tab yet, and kits and static formats aren't shared through partnerships.
 
 ---
 

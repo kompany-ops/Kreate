@@ -35,6 +35,9 @@ const { isAdmin } = useAccess()
 /** Live (edited): the recipes are built, so the shoot's details lock and its batches take over */
 const live = computed(() => shoot.value.status === 'edited')
 const loop = useBatchLoop(bundle)
+/** static ads, when the shoot has static formats: their own batch loop (SB##) */
+const hasStatics = computed(() => !!bundle.value.statics?.formats.length)
+const staticLoop = useStaticBatchLoop(bundle)
 // every status change runs from the top bar (the next step) or Actions (moving back)
 const controls = useTemplateRef<{ resume: () => Promise<void> }>('controls')
 const editing = useTemplateRef<{
@@ -62,7 +65,7 @@ const tab = computed<ShootTab>({
   set: value => router.replace({ query: { ...route.query, tab: value === defaultTab.value ? undefined : value } })
 })
 const tabItems = computed(() => [
-  ...(live.value ? [{ label: 'Batches', value: 'batches', icon: 'i-lucide-layers', badge: loop.batches.value.length || undefined }] : []),
+  ...(live.value ? [{ label: 'Batches', value: 'batches', icon: 'i-lucide-layers', badge: (loop.batches.value.length + staticLoop.batches.value.length) || undefined }] : []),
   { label: 'General', value: 'general', icon: 'i-lucide-settings-2' },
   { label: 'Formats', value: 'formats', icon: 'i-lucide-layout-template', badge: shootFormats.value.length || undefined },
   { label: 'Hooks', value: 'hooks', icon: 'i-lucide-anchor', badge: groupsOf('hook').length || undefined },
@@ -509,6 +512,8 @@ const result = computed(() => {
   return { ...calc, warnings: [...calc.warnings, ...repeats] }
 })
 const unfilled = computed(() => unfilledItems(bundle.value))
+/** static ads the shoot will make, for the calculator */
+const staticsEstimate = computed(() => estimateStatics(bundle.value))
 const calculatorOpen = ref(false)
 /** the Treatments card on General starts collapsed */
 const treatmentsOpen = ref(false)
@@ -903,7 +908,21 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
         />
 
         <!-- Batches (Live): make, track and measure them -->
-        <PlannerBatches v-if="tab === 'batches'" :bundle="bundle" :loop="loop" @changed="refresh" />
+        <!-- video and static batches side by side: separate loops, so their scores never mix -->
+        <div v-if="tab === 'batches'" class="grid gap-6" :class="{ 'xl:grid-cols-2': hasStatics }">
+          <section class="min-w-0 space-y-3">
+            <h2 v-if="hasStatics" class="text-sm font-semibold text-highlighted uppercase">
+              Video
+            </h2>
+            <PlannerBatches :bundle="bundle" :loop="loop" @changed="refresh" />
+          </section>
+          <section v-if="hasStatics" class="min-w-0 space-y-3">
+            <h2 class="text-sm font-semibold text-highlighted uppercase">
+              Statics
+            </h2>
+            <PlannerStaticBatches :bundle="bundle" :loop="staticLoop" @changed="refresh" />
+          </section>
+        </div>
 
         <!-- General: setup, slots and what's left to do -->
         <div v-else-if="tab === 'general'" class="space-y-6">
@@ -1290,7 +1309,7 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
 
       <USlideover v-model:open="calculatorOpen" title="Calculator" :ui="{ content: 'max-w-md' }">
         <template #body>
-          <PlannerCalculator :result="result" :submission-rate="Number(shoot.submission_rate)" :target="shoot.runway_target" :unfilled="unfilled" />
+          <PlannerCalculator :result="result" :submission-rate="Number(shoot.submission_rate)" :target="shoot.runway_target" :unfilled="unfilled" :statics="staticsEstimate" />
         </template>
       </USlideover>
 

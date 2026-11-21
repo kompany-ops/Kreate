@@ -8,6 +8,8 @@ const props = defineProps<{
   /** target submissions per channel per month (Setup), for runway */
   target: number
   unfilled: { code: string, slots: string[] }[]
+  /** static ads, for a shoot with static formats (estimated: planned stills taken as filmed) */
+  statics?: { recipes: number, perChannel: { name: string, recipes: number }[], batch: number } | null
 }>()
 
 
@@ -66,6 +68,21 @@ const warningsOpen = ref(false)
 
 <template>
   <div class="space-y-5 text-sm">
+    <!-- static ads: their own recipes and batches (statics spec §4) -->
+    <div v-if="props.statics" class="rounded-lg border border-default p-3">
+      <div class="flex items-baseline justify-between gap-2">
+        <p class="flex items-center gap-1.5 font-medium text-highlighted">
+          <UIcon name="i-lucide-image" class="size-4 text-muted" /> Statics
+        </p>
+        <p class="tabular-nums">
+          <span class="text-lg font-semibold text-highlighted">{{ formatNumber(props.statics.recipes) }}</span>
+          <span class="text-xs text-muted"> ads · {{ formatNumber(props.statics.batch) }} a batch</span>
+        </p>
+      </div>
+      <p class="mt-1 text-xs text-muted">
+        {{ props.statics.perChannel.map(channel => `${channel.name} ${formatNumber(channel.recipes)}`).join(' · ') }}
+      </p>
+    </div>
     <div class="grid grid-cols-2 gap-2">
       <div class="rounded-lg bg-elevated/60 p-3">
         <p class="text-xs text-muted">

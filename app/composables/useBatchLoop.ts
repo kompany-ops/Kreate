@@ -37,7 +37,8 @@ export function useBatchLoop(bundle: Ref<LoadedShoot>) {
     try {
       const [latest, rows, dropped] = await Promise.all([
         db.from('shoot_manifests').select('data').eq('shoot_id', shoot.value.id).order('version', { ascending: false }).limit(1).maybeSingle(),
-        db.from('shoot_shortlists').select('id, code, size, entry_ids, manifest_version, status, status_at, exploit_share, created_at').eq('shoot_id', shoot.value.id).order('code'),
+        // video batches only: static batches are their own loop (useStaticBatchLoop)
+        db.from('shoot_shortlists').select('id, code, size, entry_ids, manifest_version, status, status_at, exploit_share, created_at').eq('shoot_id', shoot.value.id).eq('medium', 'video').order('code'),
         db.from('shoot_element_overrides').select('element_kind, element_key, dropped').eq('shoot_id', shoot.value.id)
       ])
       manifest.value = (latest.data?.data ?? null) as Manifest | null

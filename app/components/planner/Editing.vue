@@ -58,7 +58,8 @@ async function startEditing() {
   starting.value = true
   const version = (latest.value?.version ?? 0) + 1
   const ok = await run(async () => {
-    const manifest = { ...planManifest(props.bundle), version, generated_at: new Date().toISOString() }
+    // with signed links to static formats' example ads and the brand kit's files, for Kanvas
+    const manifest = await withStaticLinks(db, { ...planManifest(props.bundle), version, generated_at: new Date().toISOString() })
     await dropboxUploader.writeText(`${base.value}/manifest.json`, JSON.stringify(manifest, null, 2))
     must(await db.from('shoot_manifests').insert({ shoot_id: shoot.value.id, version, data: manifest as unknown as Json }))
     must(await db.from('shoots').update({ status: 'editing' }).eq('id', shoot.value.id).eq('status', 'filmed'))
@@ -81,6 +82,8 @@ const checking = ref(false)
 const result = ref<EditsCheck | null>(null)
 let index: KlipIndex | null = null
 let brollShots = new Map<string, string>()
+/** each still's photos in raw/, for static recipes */
+let stills: ReturnType<typeof stillAssets> = { product: {}, avatar: {} }
 
 async function check() {
   const status = await connected()
@@ -102,6 +105,11 @@ async function check() {
         const relative = relativeToStage(props.bundle, row.path!, status.root, 'raw')
         return relative ? [[relative, row.target.split(':')[1]!] as [string, string]] : []
       }))
+
+    stills = stillAssets(raw.flatMap((file) => {
+      const relative = relativeToStage(props.bundle, file.path, status.root, 'raw')
+      return relative ? [relative] : []
+    }))
 
     // Klip's index of what it made: lengths and all come from here
     let read: KlipIndex | { error: string } | null = null
@@ -148,12 +156,13 @@ async function goLive(override = false) {
   const version = (latest.value?.version ?? 0) + 1
   const ok = await run(async () => {
     const generatedAt = new Date().toISOString()
-    const manifest = buildManifest(handedOff.value, klip, {
+    const manifest = await withStaticLinks(db, buildManifest(handedOff.value, klip, {
       version,
       generatedAt,
       brollShots,
+      stills,
       overridden: result.value!.ok ? undefined : result.value!.problems
-    })
+    }))
     await writeLiveFiles(base.value, shoot.value.code, manifest)
     must(await db.from('shoot_manifests').insert({ shoot_id: shoot.value.id, version, data: manifest as unknown as Json }))
     must(await db.from('shoots').update({ status: 'edited' }).eq('id', shoot.value.id).eq('status', 'editing'))

@@ -219,6 +219,11 @@ export interface Manifest {
   plan: ReturnType<typeof buildShootsheet>
   clips: ManifestClip[]
   /**
+   * Static ads (MANIFEST_SCHEMA_VERSION 13): each still's photos once filmed, relative to the shoot
+   * folder: product stills by channel, avatar stills by person.
+   */
+  static_assets?: { product: Record<string, string[]>, avatar: Record<string, string[]> }
+  /**
    * What the edit check found, when someone marked it ready anyway. Missing takes aren't in
    * `clips` and clips without a length can't go in recipes, so recipes needing them aren't made.
    */
@@ -233,7 +238,7 @@ export interface Manifest {
 export function buildManifest(
   bundle: ShootBundle,
   index: KlipIndex,
-  options: { version: number, generatedAt: string, brollShots?: Map<string, string>, overridden?: string[], wordsPerSecond?: number }
+  options: { version: number, generatedAt: string, brollShots?: Map<string, string>, overridden?: string[], wordsPerSecond?: number, stills?: Manifest['static_assets'] }
 ): Manifest {
   const clips: ManifestClip[] = []
   const personSlug = (id: string) => bundle.people.find(p => p.id === id)?.slug ?? 'unknown'
@@ -347,13 +352,16 @@ export function buildManifest(
     })
   }
 
+  const plan = buildShootsheet(bundle)
   return {
     schema_version: MANIFEST_SCHEMA_VERSION,
     version: options.version,
     plan_hash: planHash(bundle),
     generated_at: options.generatedAt,
-    plan: buildShootsheet(bundle),
+    plan,
     clips,
+    // the stills' photos, for static recipes (only for a shoot with static formats)
+    ...('static' in plan ? { static_assets: options.stills ?? { product: {}, avatar: {} } } : {}),
     ...(options.overridden?.length ? { overridden: options.overridden } : {})
   }
 }

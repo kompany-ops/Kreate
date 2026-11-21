@@ -1,7 +1,8 @@
 import type { Manifest } from '#shared/utils/manifest'
 
 /**
- * A Live manifest's files in the shoot's folder: `manifest.json` and every recipe (`recipes.json`).
+ * A Live manifest's files in the shoot's folder: `manifest.json`, every recipe (`recipes.json`) and,
+ * for a shoot with static formats, every static recipe (`statics.json`, docs/contract-kanvas.md).
  * Written when the shoot goes Live, and again when a setting that only shapes the recipes (wording
  * mixes) changes before the first batch. Returns the recipes.
  */
@@ -19,5 +20,16 @@ export async function writeLiveFiles(base: string, shootCode: string, manifest: 
     // and the renderer composes the treatment from their blocks
     recipes
   }, null, 2))
+  // static ads (Kanvas): every static recipe, grouped by channel
+  const statics = staticInputFromManifest(manifest)
+  if (statics) {
+    await dropboxUploader.writeText(`${base}/statics.json`, JSON.stringify(staticsFile({
+      shoot: shootCode,
+      manifestVersion: manifest.version,
+      generatedAt: manifest.generated_at,
+      planHash: manifest.plan_hash,
+      recipes: buildStaticRecipes(statics)
+    }), null, 2))
+  }
   return recipes
 }

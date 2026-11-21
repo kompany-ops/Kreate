@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "kanvas_version": "0.1.0",
+  "plan_hash": "sha256:3f1c0d6e9a2b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
+  "shoot": "S001",
+  "updated_at": "2026-11-21T10:00:00.000Z",
+  "assets": [
+    { "file": "edited/topdognix/stills/IMG_0412.cutout.png", "kind": "cutout", "of": "raw/topdognix/stills/product/IMG_0412.jpg" },
+    { "file": "edited/topdognix/stills/frame-H01-1.png", "kind": "frame", "of": "edited/topdognix/hooks/joe/H01.mp4", "person": "joe" }
+  ],
+  "renders": [
+    {
+      "recipe": "S001_topdognix_SF01.text_product_A01_9c1d2e3f",
+      "batch": "SB01",
+      "status": "rendered",
+      "files": {
+        "1x1": "renders/SB01/topdognix/S001_topdognix_SF01.text_product_A01_9c1d2e3f.1x1.png",
+        "4x5": "renders/SB01/topdognix/S001_topdognix_SF01.text_product_A01_9c1d2e3f.4x5.png",
+        "9x16": "renders/SB01/topdognix/S001_topdognix_SF01.text_product_A01_9c1d2e3f.9x16.png"
+      },
+      "product": "from_still",
+      "flags": [],
+      "attempts": 1,
+      "model": "image-model-1"
+    },
+    {
+      "recipe": "S001_topdognix_SF01.text_product_A02_0a0b0c0d",
+      "batch": "SB01",
+      "status": "rendered",
+      "files": {
+        "1x1": "renders/SB01/topdognix/S001_topdognix_SF01.text_product_A02_0a0b0c0d.1x1.png",
+        "4x5": "renders/SB01/topdognix/S001_topdognix_SF01.text_product_A02_0a0b0c0d.4x5.png",
+        "9x16": null
+      },
+      "product": "generated",
+      "flags": [
+        { "code": "generated_product", "note": "No product still on topdognix: the pack was drawn from the brand kit." },
+        { "code": "text_mismatch", "size": "4x5", "note": "\"chews\" rendered as \"chew\"." }
+      ],
+      "attempts": 2,
+      "model": "image-model-1"
+    },
+    {
+      "recipe": "S001_topdognix_joe_SF02.text_avatar_A03_1e2f3a4b",
+      "batch": "SB01",
+      "status": "failed",
+      "files": { "4x5": null },
+      "product": "none",
+      "flags": [{ "code": "composition", "note": "The face was cropped in every attempt." }],
+      "attempts": 3,
+      "model": "image-model-1"
+    }
+  ]
+}

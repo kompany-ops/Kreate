@@ -119,7 +119,7 @@ describe('buildManifest', () => {
       generatedAt: '2026-10-21T10:00:00Z',
       brollShots: new Map([['topdognix/b-roll/problem/img_1.mov', 'b1']])
     })
-    expect(manifest).toMatchObject({ version: 1, schema_version: 12, plan_hash: planHash(b) })
+    expect(manifest).toMatchObject({ version: 1, schema_version: 13, plan_hash: planHash(b) })
     // the edited clip and the raw one it came from, each under its own extension
     expect(manifest.clips[0]).toMatchObject({ file: 'topdognix/hooks/joe/H01.mp4', raw_file: 'topdognix/hooks/joe/H01.mov', blocks: { captions: 'topdognix/hooks/joe/H01.captions.webm' } })
     expect(manifest.clips[4]).toMatchObject({ file: 'topdognix/b-roll/problem/IMG_1.mp4', raw_file: 'topdognix/b-roll/problem/IMG_1.MOV' })

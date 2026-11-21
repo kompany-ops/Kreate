@@ -293,7 +293,7 @@ export function registerAccountTools(kit: AccountToolKit) {
     if (shoot.status !== 'edited') throw new Error(`${shoot.code} isn't Live, so it has no batches.`)
     const [manifest, batches, overrides] = await Promise.all([
       db.from('shoot_manifests').select('data').eq('shoot_id', shoot.id).order('version', { ascending: false }).limit(1).maybeSingle(),
-      db.from('shoot_shortlists').select('id, code, size, entry_ids, status, status_at, created_at').eq('shoot_id', shoot.id).order('code'),
+      db.from('shoot_shortlists').select('id, code, size, entry_ids, status, status_at, created_at').eq('shoot_id', shoot.id).eq('medium', 'video').order('code'),
       db.from('shoot_element_overrides').select('element_kind, element_key, dropped').eq('shoot_id', shoot.id)
     ])
     const batchRows = check(batches) ?? []

@@ -1,6 +1,7 @@
 // Shoot codes, folder paths and the export builders (spec §10). Pure: shared by the
 // builder, the shot sheet and the Nitro export routes.
 import type { BundleStatics } from './statics'
+import { buildStaticPlan } from './kanvas'
 import type { Beat, SlotContext } from './slots'
 import { beatWordings, buildSlotContext, channelSlotsIn, estimateSeconds, joinBeats, parseBeats, parseTakeKey, renderBeats, renderScript, slugify, takeKey } from './slots'
 import { parseSlotValues } from './orgProfile'
@@ -8,6 +9,8 @@ import type { ItemKind } from './calculator'
 import { isDrawable, planHash } from './klip'
 
 /**
+ * 12: a shoot with static formats carries `static` (docs/contract-kanvas.md): its static formats,
+ * the brand's design kit, the static copy filled per channel and the stills.
  * 11: hooks and CTAs carry `alternates`, their other wordings, each a take of its own
  * (`<code>-<option>`, docs/contract.md §3).
  * 10: treatments drop `sidecar` and `applies_to`: Klip makes building blocks, and what each
@@ -27,7 +30,7 @@ import { isDrawable, planHash } from './klip'
  * `broll_variations`, now used). 3: b-roll shots no
  * longer carry product_visible or min_clips. 2: custom slot values moved to plan.shoot.
  */
-export const SHOOTSHEET_SCHEMA_VERSION = 11
+export const SHOOTSHEET_SCHEMA_VERSION = 12
 export const DEFAULT_BEATS = ['problem', 'product', 'result']
 
 export interface BundleChannel {
@@ -181,6 +184,8 @@ export interface ShootBundle {
     /** extra versions per VO from combining alternate beat wordings, per person */
     wording_variations?: number
     submission_rate: number
+    /** static ads: extra recipes per copy from its slots' other wordings */
+    static_wording_variations?: number
     /** custom slots filled in for this shoot ({{benefit}}…); built-ins fill themselves */
     slot_values?: unknown
   }
@@ -703,6 +708,7 @@ export function linkedCodes(bundle: Pick<ShootBundle, 'items'>, item: BundleItem
 
 /** The plan (spec §10c): the shoot, people, channels, formats, items and b-roll shots. Part of the manifest. */
 export function buildShootsheet(bundle: ShootBundle) {
+  const staticPlan = buildStaticPlan(bundle)
   const formats = new Map<string, NonNullable<BundleItem['format']>>()
   for (const item of bundle.items) if (item.format) formats.set(item.format.code, item.format)
 
@@ -813,7 +819,9 @@ export function buildShootsheet(bundle: ShootBundle) {
         description: shot.description,
         folder: brollFolder(bundle, shot, channelId, 'edited'),
         raw_folder: brollFolder(bundle, shot, channelId, 'raw')
-      })))
+      }))),
+    // static ads (statics spec): what Kanvas works from, when the shoot has static formats
+    ...(staticPlan ? { static: staticPlan } : {})
   }
 }
 
@@ -891,6 +899,8 @@ export function skeletonFolders(bundle: ShootBundle): string[] {
 }
 
 /**
+ * 13: the plan follows shoot sheet 12 (`static`), and a Live manifest of a shoot with static formats
+ * carries `static_assets`: each still's photos, by channel (product) and person (avatar).
  * 12: a hook or CTA clip can be another wording of it (`option` 2, 3…, its file `<code>-<option>`);
  * the plan follows shoot sheet 11.
  * 11: the manifest carries `plan_hash` (what Klip works from, hashed); take clips carry `role`,
@@ -910,7 +920,7 @@ export function skeletonFolders(bundle: ShootBundle): string[] {
  * longer carry product_visible. 3: clips carry `feature` (VOs the feature they're about, b-roll its
  * feature folder or null).
  */
-export const MANIFEST_SCHEMA_VERSION = 12
+export const MANIFEST_SCHEMA_VERSION = 13
 
 /**
  * The manifest before the edits are in (spec §14): just the plan, version 0, no clips. Written

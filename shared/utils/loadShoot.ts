@@ -115,7 +115,7 @@ export async function loadShootBundle(db: SupabaseClient<Database>, code: string
   const { product: productWithBrand, ...shoot } = found
   const { brand, ...product } = productWithBrand
 
-  const [people, channels, items, broll, links, planned, treatments, settings, staticFormats, staticCopies, stills] = await Promise.all([
+  const [people, channels, items, broll, links, planned, treatments, settings, staticFormats, staticCopies, stills, kit, features] = await Promise.all([
     db.from('shoot_people').select('person:people(*)').eq('shoot_id', shoot.id),
     db.from('shoot_channels').select('channel:channels(*)').eq('shoot_id', shoot.id),
     db.from('shoot_items').select(ITEM_SELECT).eq('shoot_id', shoot.id).order('sort_order').order('created_at'),
@@ -126,7 +126,9 @@ export async function loadShootBundle(db: SupabaseClient<Database>, code: string
     db.from('settings').select('channel_slots').limit(1).maybeSingle(),
     db.from('shoot_static_formats').select('format:static_formats(*)').eq('shoot_id', shoot.id),
     db.from('static_copies').select('*').eq('shoot_id', shoot.id).order('code'),
-    db.from('still_shots').select('*').eq('shoot_id', shoot.id).order('sort_order').order('created_at')
+    db.from('still_shots').select('*').eq('shoot_id', shoot.id).order('sort_order').order('created_at'),
+    db.from('brand_kits').select('*').eq('brand_id', brand.id).maybeSingle(),
+    db.from('product_features').select('id, slug, name').eq('product_id', product.id).order('sort_order')
   ])
 
   const peopleRows = unwrap(people).map(row => row.person as Row<'people'>).sort((a, b) => a.name.localeCompare(b.name))
@@ -148,7 +150,9 @@ export async function loadShootBundle(db: SupabaseClient<Database>, code: string
     statics: {
       formats: unwrap(staticFormats).map(row => row.format as unknown as Row<'static_formats'>).filter(Boolean).sort((a, b) => a.code.localeCompare(b.code)),
       copies: unwrap(staticCopies),
-      stills: unwrap(stills)
+      stills: unwrap(stills),
+      kit: unwrap(kit),
+      features: unwrap(features)
     }
   }
 }

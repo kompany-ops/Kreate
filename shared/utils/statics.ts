@@ -374,6 +374,10 @@ export interface BundleStatics {
   formats: Row<'static_formats'>[]
   copies: Row<'static_copies'>[]
   stills: Row<'still_shots'>[]
+  /** the brand's design kit (null: none yet) */
+  kit?: Row<'brand_kits'> | null
+  /** the product's features, for copy and stills about one */
+  features?: { id: string, slug: string, name: string }[]
 }
 
 /** A copy with its slots filled for one channel ({{brand}}, {{product}}, channel and custom slots). */

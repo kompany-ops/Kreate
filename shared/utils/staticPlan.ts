@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '../types/database.types'
 import type { Row } from '../types/models'
 import type { LoadedShoot } from './loadShoot'
+import type { PlanStatic } from './kanvas'
 import type { KitColor, KitFont, KitLogo, StaticReference, StaticRules, StaticSlot, StillKind } from './statics'
 import {
   cleanCopySlots, cleanKitColors, cleanKitFonts, cleanStaticRules, cleanStaticSizes, cleanStaticSlots, cleanStaticVariants, KIT_LOGO_USES,
@@ -321,4 +322,38 @@ export async function updateStillShot(db: Db, bundle: LoadedShoot, id: string, i
 export async function removeStillShots(db: Db, bundle: LoadedShoot, ids: string[]) {
   requireDraft(bundle, 'its stills')
   if (ids.length) check(await db.from('still_shots').delete().in('id', ids))
+}
+
+// --- handing statics to Kanvas ----------------------------------------------------------------
+
+/** How long the links in a manifest's static plan last: long enough for Kanvas to prep and render. */
+export const STATIC_LINK_SECONDS = 60 * 60 * 24 * 30
+
+/**
+ * A manifest with signed links on its static plan's files (example ads, logos, font files), so
+ * Kanvas can fetch them from Kreate's private storage. The plan hash doesn't include them.
+ */
+export async function withStaticLinks<T extends { plan: { static?: PlanStatic | null } }>(db: Db, manifest: T): Promise<T> {
+  const plan = manifest.plan.static
+  if (!plan) return manifest
+  const references = await signedStaticReferences(db, plan.formats.flatMap(format => format.references.map(ref => ref.path)), STATIC_LINK_SECONDS)
+  const kitPaths = plan.brand_kit ? [...plan.brand_kit.logos.map(logo => logo.path), ...plan.brand_kit.fonts.flatMap(font => font.file ? [font.file] : [])] : []
+  const kit = await signedBrandKitFiles(db, kitPaths, STATIC_LINK_SECONDS)
+  return {
+    ...manifest,
+    plan: {
+      ...manifest.plan,
+      static: {
+        ...plan,
+        formats: plan.formats.map(format => ({ ...format, references: format.references.map(ref => ({ ...ref, url: references[ref.path] })) })),
+        brand_kit: plan.brand_kit
+          ? {
+              ...plan.brand_kit,
+              logos: plan.brand_kit.logos.map(logo => ({ ...logo, url: kit[logo.path] })),
+              fonts: plan.brand_kit.fonts.map(font => ({ ...font, url: font.file ? kit[font.file] : undefined }))
+            }
+          : null
+      }
+    }
+  }
 }
