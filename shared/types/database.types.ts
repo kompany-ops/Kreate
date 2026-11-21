@@ -1787,6 +1787,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           default_submission_rate: number
+          default_static_submission_rate: number
           general_broll: Json
           id: string
           minutes_per_cta_sync: number
@@ -1815,6 +1816,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           default_submission_rate?: number
+          default_static_submission_rate?: number
           general_broll?: Json
           id?: string
           minutes_per_cta_sync?: number
@@ -1843,6 +1845,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           default_submission_rate?: number
+          default_static_submission_rate?: number
           general_broll?: Json
           id?: string
           minutes_per_cta_sync?: number
@@ -2392,6 +2395,8 @@ export type Database = {
           runway_target: number
           shoot_date: string | null
           slot_values: Json
+          static_submission_rate: number
+          static_wording_variations: number
           stale_at: string | null
           stale_by: string | null
           started_at: string | null
@@ -2425,6 +2430,8 @@ export type Database = {
           runway_target?: number
           shoot_date?: string | null
           slot_values?: Json
+          static_submission_rate?: number
+          static_wording_variations?: number
           stale_at?: string | null
           stale_by?: string | null
           started_at?: string | null
@@ -2458,6 +2465,8 @@ export type Database = {
           runway_target?: number
           shoot_date?: string | null
           slot_values?: Json
+          static_submission_rate?: number
+          static_wording_variations?: number
           stale_at?: string | null
           stale_by?: string | null
           started_at?: string | null
@@ -2501,6 +2510,63 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      static_copies: {
+        Row: {
+          code: string
+          created_at: string
+          created_by: string | null
+          cast_channel_id: string | null
+          feature_id: string | null
+          id: string
+          notes: string | null
+          org_id: string
+          person_id: string | null
+          product_id: string
+          shoot_id: string
+          slots: Json
+          sort_order: number
+          static_format_id: string
+          tags: string[]
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          created_by?: string | null
+          cast_channel_id?: string | null
+          feature_id?: string | null
+          id?: string
+          notes?: string | null
+          org_id?: string
+          person_id?: string | null
+          product_id: string
+          shoot_id: string
+          slots?: Json
+          sort_order?: number
+          static_format_id: string
+          tags?: string[]
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          created_by?: string | null
+          cast_channel_id?: string | null
+          feature_id?: string | null
+          id?: string
+          notes?: string | null
+          org_id?: string
+          person_id?: string | null
+          product_id?: string
+          shoot_id?: string
+          slots?: Json
+          sort_order?: number
+          static_format_id?: string
+          tags?: string[]
+          updated_at?: string
+        }
+        Relationships: []
       }
       static_formats: {
         Row: {
@@ -2575,6 +2641,54 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      still_shots: {
+        Row: {
+          count: number
+          created_at: string
+          created_by: string | null
+          description: string
+          feature_id: string | null
+          id: string
+          kind: string
+          org_id: string
+          photos_filmed: number
+          shoot_id: string
+          sort_order: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          count?: number
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          feature_id?: string | null
+          id?: string
+          kind: string
+          org_id?: string
+          photos_filmed?: number
+          shoot_id: string
+          sort_order?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          count?: number
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          feature_id?: string | null
+          id?: string
+          kind?: string
+          org_id?: string
+          photos_filmed?: number
+          shoot_id?: string
+          sort_order?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       treatments: {
         Row: {

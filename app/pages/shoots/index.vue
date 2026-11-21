@@ -110,7 +110,8 @@ async function save() {
       product_id: chosen.id,
       shoot_date: draft.shoot_date || null,
       kit: draft.kit,
-      submission_rate: Number(settings.value?.default_submission_rate ?? 0.05)
+      submission_rate: Number(settings.value?.default_submission_rate ?? 0.05),
+      static_submission_rate: Number(settings.value?.default_static_submission_rate ?? 0.05)
     }).select('*').single())
 
     // Channels default to the brand's assigned channels.

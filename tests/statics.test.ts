@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   cleanKitColors, cleanKitFonts, kitHex, parseBrandKit,
+  cleanCopySlots, copyCombinations, copyGaps, nextStaticCopyCode, parseCopySlots, renderCopy, staticBlockers, stillsNeeded, suggestedStills,
   cleanStaticRules, cleanStaticSlots, cleanStaticVariants, nextStaticFormatCode, parseStaticFormatsCsv,
   parseStaticReferences, parseStaticRules, parseStaticSlots, slotOverLimit, staticSlotKey, variantNeeds
 } from '../shared/utils/statics'
@@ -120,5 +121,57 @@ describe('brand kits', () => {
     expect(() => cleanKitColors([{ name: 'Brand', hex: 'orange' }])).toThrow(/isn't a colour/)
     expect(cleanKitFonts([{ role: 'body', family: ' Lora ' }, { role: 'headline', family: '' }])).toEqual([{ role: 'body', family: 'Lora', file: null }])
     expect(() => cleanKitFonts([{ role: 'body', family: 'A' }, { role: 'body', family: 'B' }])).toThrow(/already a body font/)
+  })
+})
+
+describe('static copy', () => {
+  const slots = [
+    { key: 'headline', label: 'Headline', max_words: 6, guidance: null, example: null, required: true },
+    { key: 'sub', label: 'Sub-head', max_words: null, guidance: null, example: null, required: false }
+  ]
+
+  it('cleans copy against its format: its slots in order, required ones filled, wordings tidy', () => {
+    expect(cleanCopySlots(slots, [
+      { slot: 'sub', text: '' },
+      { slot: 'headline', text: ' My {{dog}} eats ', alternates: ['My {{dog}} eats', 'Dinner, solved', ' ', { text: 'Dinner, solved' }] }
+    ])).toEqual([{ slot: 'headline', text: 'My {{dog}} eats', alternates: [{ text: 'Dinner, solved' }] }])
+    expect(() => cleanCopySlots(slots, [{ slot: 'sub', text: 'x' }])).toThrow(/"Headline" needs copy/)
+    expect(() => cleanCopySlots(slots, [{ slot: 'headline', text: 'x' }, { slot: 'price', text: '$5' }])).toThrow(/no price slot/)
+  })
+
+  it('counts wordings, finds gaps and numbers codes', () => {
+    const copy = parseCopySlots([{ slot: 'headline', text: 'a', alternates: [{ text: 'b' }, { text: 'c' }] }, { slot: 'sub', text: 'd', alternates: [{ text: 'e' }] }])
+    expect(copyCombinations(copy)).toBe(6)
+    expect(copyGaps(slots, [{ slot: 'sub', text: 'x', alternates: [] }])).toEqual(['Headline'])
+    expect(nextStaticCopyCode(['A01', 'A07'])).toBe('A08')
+  })
+
+  it('fills a copy for a channel and says what\'s left unfilled', () => {
+    const copy = parseCopySlots([{ slot: 'headline', text: '{{dog}} loves {{product}}', alternates: [{ text: '{{offer}} today' }] }])
+    expect(renderCopy(copy, { dog: 'Nix', product: 'Chews' })).toEqual({
+      slots: [{ slot: 'headline', text: 'Nix loves Chews', alternates: ['{{offer}} today'] }],
+      unfilled: ['offer']
+    })
+  })
+
+  it('stops planning until each format has its copy and the stills its variants need', () => {
+    const format = { id: 'f1', code: 'SF01', slots, variants: ['text', 'text_product'] }
+    const bundle = {
+      shoot: { slot_values: {} },
+      brand: { name: 'Brand' },
+      product: { name: 'Chews' },
+      channels: [{ id: 'c1', name: 'topdognix', slot_values: { dog: 'Nix' } }],
+      statics: { formats: [format], copies: [], stills: [] }
+    } as unknown as Parameters<typeof staticBlockers>[0]
+    expect(staticBlockers(bundle)).toEqual(['Write copy for SF01 (Statics)', 'Add product stills (Statics): a format has a product variant'])
+    bundle.statics!.copies.push({ code: 'A01', static_format_id: 'f1', cast_channel_id: null, slots: [{ slot: 'headline', text: '{{offer}} for {{dog}}' }] } as never)
+    bundle.statics!.stills.push({ kind: 'product' } as never)
+    expect(staticBlockers(bundle)).toEqual(['Fill the slots in A01 (Statics)'])
+  })
+
+  it('suggests stills for what the variants show', () => {
+    expect(stillsNeeded(['text', 'text_avatar'])).toEqual({ product: false, avatar: true })
+    expect(suggestedStills('avatar', true)).toHaveLength(3)
+    expect(suggestedStills('avatar', false)).toHaveLength(2)
   })
 })

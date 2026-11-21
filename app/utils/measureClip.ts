@@ -76,3 +76,27 @@ export async function measureVideo(file: File): Promise<{ width: number, height:
   video.load()
   return measured
 }
+
+/** A photo's size in pixels (0 × 0 when the browser can't read it, e.g. some HEIC files). */
+export async function measureImage(file: File): Promise<{ width: number, height: number }> {
+  try {
+    const bitmap = await createImageBitmap(file)
+    const size = { width: bitmap.width, height: bitmap.height }
+    bitmap.close()
+    return size
+  } catch {
+    return await new Promise((resolve) => {
+      const url = URL.createObjectURL(file)
+      const image = new Image()
+      image.onload = () => {
+        resolve({ width: image.naturalWidth, height: image.naturalHeight })
+        URL.revokeObjectURL(url)
+      }
+      image.onerror = () => {
+        resolve({ width: 0, height: 0 })
+        URL.revokeObjectURL(url)
+      }
+      image.src = url
+    })
+  }
+}

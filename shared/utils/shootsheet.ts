@@ -1,5 +1,6 @@
 // Shoot codes, folder paths and the export builders (spec §10). Pure: shared by the
 // builder, the shot sheet and the Nitro export routes.
+import type { BundleStatics } from './statics'
 import type { Beat, SlotContext } from './slots'
 import { beatWordings, buildSlotContext, channelSlotsIn, estimateSeconds, joinBeats, parseBeats, parseTakeKey, renderBeats, renderScript, slugify, takeKey } from './slots'
 import { parseSlotValues } from './orgProfile'
@@ -193,6 +194,8 @@ export interface ShootBundle {
   treatments?: BundleTreatment[]
   /** shoot people linked to each channel; on those channels recipes mix people */
   channelPeople?: Record<string, string[]>
+  /** its static formats, static copy and stills (docs/spec-statics.md) */
+  statics?: BundleStatics
   /** the org's channel slots (Settings → Scripts): a line that uses one is filmed per channel */
   channelSlots?: string[]
 }
@@ -491,6 +494,21 @@ export function brollFolder(bundle: ShootBundle, shot: Pick<BundleBroll, 'format
   return `${shootFolder(bundle)}/${stage}/${channelFolder(bundle, channelId)}/b-roll/${section}${feature}`
 }
 
+/**
+ * Stills for static ads (statics spec §5), loose in their folder like b-roll: product stills per
+ * channel (`raw/<channel>/stills/product/`), avatar stills per person under the first of their
+ * channels on the shoot (`raw/<channel>/stills/avatar/<person>/`).
+ */
+export function stillFolder(bundle: ShootBundle, kind: 'product' | 'avatar', owner: string, stage: ClipStage = 'raw'): string {
+  if (kind === 'product') return `${shootFolder(bundle)}/${stage}/${channelFolder(bundle, owner)}/stills/product`
+  const person = bundle.people.find(entry => entry.id === owner)?.slug ?? 'unknown'
+  return `${shootFolder(bundle)}/${stage}/${channelFolder(bundle, avatarChannel(bundle, owner))}/stills/avatar/${person}`
+}
+/** The channel a person's avatar stills sit under: the first of theirs on the shoot, by name. */
+export function avatarChannel(bundle: Pick<ShootBundle, 'channels' | 'channelPeople'>, personId: string): string | null {
+  return [...channelsFor(bundle, personId)].sort((a, b) => a.name.localeCompare(b.name))[0]?.id ?? null
+}
+
 // --- recordings ----------------------------------------------------------------
 
 /**
@@ -634,7 +652,7 @@ export function brollShortfalls(
  * else with the same file is a different shot. Null when the target isn't on the shoot.
  */
 export function clipSpotInfo(
-  bundle: Pick<ShootBundle, 'items' | 'broll' | 'people' | 'channels'>,
+  bundle: Pick<ShootBundle, 'items' | 'broll' | 'people' | 'channels' | 'statics'>,
   target: string
 ): { shot: string, label: string, brollFormat?: string | null } | null {
   const [kind, id, part] = target.split(':')
@@ -658,6 +676,12 @@ export function clipSpotInfo(
       // its format's section (null: general product shots, which go under any VO)
       brollFormat: shot.format_id ?? null
     }
+  }
+  if (kind === 'still') {
+    const still = bundle.statics?.stills.find(entry => entry.id === id)
+    if (!still) return null
+    const owner = still.kind === 'product' ? channelName(part) : bundle.people.find(person => person.id === part)?.name
+    return { shot: `still:${still.id}`, label: [`still "${still.description}"`, owner].filter(Boolean).join(' · ') }
   }
   return null
 }
@@ -859,6 +883,10 @@ export function skeletonFolders(bundle: ShootBundle): string[] {
     folders.add(shot.folder)
     folders.add(shot.raw_folder)
   }
+  // stills for static ads: product per channel, avatar per person
+  const stills = bundle.statics?.stills.filter(still => still.status !== 'skipped') ?? []
+  if (stills.some(still => still.kind === 'product')) for (const channel of bundle.channels) folders.add(stillFolder(bundle, 'product', channel.id))
+  if (stills.some(still => still.kind === 'avatar')) for (const person of bundle.people) folders.add(stillFolder(bundle, 'avatar', person.id))
   return [...folders].sort()
 }
 

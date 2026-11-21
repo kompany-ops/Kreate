@@ -85,10 +85,12 @@ const fakeUploaded = (clip: { state: string, path: string | null }) => clip.stat
 
 export const NO_DROPBOX = 'Dropbox isn\'t connected, so nothing was uploaded. Your clips are still on this phone: someone on the team connects Dropbox in Settings → Dropbox, then press Try again.'
 
-/** One clip per target: a shoot item (or one beat of a VO), or one required clip of a b-roll shot for one channel. */
+/** One clip per target: a shoot item (or one beat of a VO), one clip of a b-roll shot for one channel, or one photo of a still. */
 export const clipTarget = {
   item: (itemId: string, beat: string | null = null) => beat ? `item:${itemId}:${slugify(beat) || 'beat'}` : `item:${itemId}`,
-  broll: (shotId: string, channelId: string | null, index: number) => `broll:${shotId}:${channelId ?? 'shared'}:${index}`
+  broll: (shotId: string, channelId: string | null, index: number) => `broll:${shotId}:${channelId ?? 'shared'}:${index}`,
+  /** a photo for a still: a product still per channel, an avatar still per person */
+  still: (shotId: string, ownerId: string, index: number) => `still:${shotId}:${ownerId}:${index}`
 }
 
 /** The clip's own extension (".mov", ".m4a"…), kept when it's renamed to its code. */

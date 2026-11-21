@@ -456,13 +456,14 @@ export function buildConnectorServer(event: H3Event, token: string, clientId: st
     const formatRows = codes.length ? must(await db.from('formats').select('id, code').eq('archived', false).in('code', codes)) ?? [] : []
     const unknown = codes.filter(code => !formatRows.some(row => row.code === code))
     if (unknown.length) return failure(`These aren't formats here: ${unknown.join(', ')}.`)
-    const settings = must(await db.from('settings').select('default_submission_rate').limit(1).maybeSingle())
+    const settings = must(await db.from('settings').select('default_submission_rate, default_static_submission_rate').limit(1).maybeSingle())
     const shoot = must(await db.from('shoots').insert({
       product_id: product.id,
       shoot_date: date ?? null,
       kit: 'custom',
       notes: notes?.trim() || null,
-      submission_rate: Number(settings?.default_submission_rate ?? 0.05)
+      submission_rate: Number(settings?.default_submission_rate ?? 0.05),
+      static_submission_rate: Number(settings?.default_static_submission_rate ?? 0.05)
     }).select('id, code').single())!
     const channels = must(await db.from('brand_channels').select('channel_id').eq('brand_id', product.brand_id)) ?? []
     if (channels.length) must(await db.from('shoot_channels').insert(channels.map(row => ({ shoot_id: shoot.id, channel_id: row.channel_id }))))

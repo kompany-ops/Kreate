@@ -6,6 +6,7 @@ import type { Database, Json } from '../types/database.types'
 import type { Insert, Row } from '../types/models'
 import type { LoadedShoot } from './loadShoot'
 import type { ShotGroup } from './shootsheet'
+import { staticBlockers } from './statics'
 import { channelsFor, groupShotList, isStandalone, itemPrefix, nextItemCodes, performs, planSnapshots, unfilledItems } from './shootsheet'
 
 type Db = SupabaseClient<Database>
@@ -247,6 +248,7 @@ export function planBlockers(bundle: LoadedShoot): string[] {
   if (unfilled.length) {
     list.push(`Fill or override the unfilled slots in ${unfilled.slice(0, 6).map(entry => entry.code).join(', ')}${unfilled.length > 6 ? '…' : ''}`)
   }
+  list.push(...staticBlockers(bundle))
   return list
 }
 

@@ -2,7 +2,7 @@
 import type { BrollShot } from '#shared/utils/loadShoot'
 import type { LoadedShoot } from '#shared/utils/loadShoot'
 import type { BundleItem, ShotGroup } from '#shared/utils/shootsheet'
-import { brollChannelIds, clipSpotInfo } from '#shared/utils/shootsheet'
+import { brollChannelIds, clipSpotInfo, stillFolder } from '#shared/utils/shootsheet'
 import type { Row } from '#shared/types/models'
 
 // On-set shot sheet (spec §10a): phone-first, big tap targets, saves on every tap.
@@ -36,8 +36,8 @@ const waitingToStart = computed(() => !isAdmin.value && ['draft', 'planned'].inc
 
 // Filters live in the URL: ?person=[slug] (or everyone; admins only) and ?show=hook|cta|body|broll (or everything).
 const person = computed(() => isAdmin.value ? bundle.value.people.find(p => p.slug === route.query.person) ?? null : mine.value)
-type Show = 'all' | 'hook' | 'cta' | 'body' | 'broll'
-const show = computed<Show>(() => (['hook', 'cta', 'body', 'broll'] as const).find(value => value === route.query.show) ?? 'all')
+type Show = 'all' | 'hook' | 'cta' | 'body' | 'broll' | 'stills'
+const show = computed<Show>(() => (['hook', 'cta', 'body', 'broll', 'stills'] as const).find(value => value === route.query.show) ?? 'all')
 /** only what's still to film (or skip): ?left=1 */
 const notDone = computed(() => route.query.left === '1')
 function setFilter(next: { person?: string | null, show?: Show, left?: boolean }) {
@@ -55,7 +55,9 @@ const showOptions = computed(() => [
   { value: 'hook' as const, label: 'Hooks', count: shotListFor('hook') },
   { value: 'cta' as const, label: 'CTAs', count: shotListFor('cta') },
   { value: 'body' as const, label: 'VOs', count: shotListFor('body') },
-  { value: 'broll' as const, label: 'B-roll', count: visibleBroll.value.length }
+  { value: 'broll' as const, label: 'B-roll', count: visibleBroll.value.length },
+  // stills for static ads, when the shoot has any
+  ...(visibleStills.value.length ? [{ value: 'stills' as const, label: 'Stills', count: visibleStills.value.length }] : [])
 ])
 
 // An admin on the cast opens on their own shots.
@@ -165,7 +167,7 @@ const brollGroups = computed(() => {
 
 /** Ticked off out of what's showing (b-roll counts when it's on screen). */
 const progress = computed(() => {
-  const entries = [...visibleItems.value, ...(showBroll.value ? visibleBroll.value : [])]
+  const entries = [...visibleItems.value, ...(showBroll.value ? visibleBroll.value : []), ...(showStills.value ? visibleStills.value : [])]
   return { done: entries.filter(entry => entry.status !== 'planned').length, total: entries.length }
 })
 
@@ -351,6 +353,7 @@ onMounted(async () => {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'shoots', filter: `id=eq.${id}` }, reloadSoon)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shoot_items', filter: `shoot_id=eq.${id}` }, reloadSoon)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'broll_shots', filter: `shoot_id=eq.${id}` }, reloadSoon)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'still_shots', filter: `shoot_id=eq.${id}` }, reloadSoon)
     .subscribe()
   document.addEventListener('visibilitychange', onVisible)
   stopClips = await loadClips(shootRef(), reloadSoon).catch(() => undefined)
@@ -401,6 +404,58 @@ function skipBroll(shot: Row<'broll_shots'>) {
     status: skipped ? (brollDone(shot) ? 'filmed' : 'planned') : 'skipped'
   })
 }
+
+// --- stills (statics spec §5) ----------------------------------------------------------------
+// Photos for static ads: product stills on each channel, avatar stills of each person, as many as
+// each still asks for. Like b-roll they go loose into their folder, and the still is ticked off once
+// every channel (or person) has its photos.
+const showStills = computed(() => show.value === 'all' || show.value === 'stills')
+/** who a still's photos are for: every channel (product) or person (avatar) on the shoot */
+const stillOwnersAll = (still: Row<'still_shots'>): { id: string, name: string }[] => still.kind === 'product'
+  ? bundle.value.channels.map(channel => ({ id: channel.id, name: channel.name }))
+  : bundle.value.people.map(entry => ({ id: entry.id, name: entry.name }))
+/** …the ones in view: a person sees their own channels, or themselves */
+const stillOwners = (still: Row<'still_shots'>) => stillOwnersAll(still).filter(owner => !person.value
+  || (still.kind === 'product' ? bundle.value.channelPeople?.[owner.id]?.includes(person.value.id) : owner.id === person.value.id))
+const visibleStills = computed(() => notOnShoot.value ? [] : (bundle.value.statics?.stills ?? []).filter(still => stillOwners(still).length))
+const MAX_STILL_PHOTOS = 40
+const stillSlots = (still: Row<'still_shots'>, ownerId: string) =>
+  Array.from({ length: MAX_STILL_PHOTOS }, (_, index) => index).filter(index => taken(clipTarget.still(still.id, ownerId, index)))
+const nextStillSlot = (still: Row<'still_shots'>, ownerId: string) => {
+  const used = stillSlots(still, ownerId)
+  return Array.from({ length: MAX_STILL_PHOTOS }, (_, index) => index).find(index => !used.includes(index)) ?? null
+}
+const stillDone = (still: Row<'still_shots'>) => stillOwnersAll(still).every(owner => stillSlots(still, owner.id).length >= still.count)
+const stillDoneInView = (still: Row<'still_shots'>) => still.status === 'filmed'
+  || (still.status !== 'skipped' && stillOwners(still).every(owner => stillSlots(still, owner.id).length >= still.count))
+const stillsShort = (still: Row<'still_shots'>) => stillOwnersAll(still).filter(owner => stillSlots(still, owner.id).length < still.count).map(owner => owner.name)
+const stillGroups = computed(() => (['product', 'avatar'] as const).map(kind => ({
+  kind,
+  title: kind === 'product' ? 'Product' : 'Avatar',
+  stills: visibleStills.value.filter(still => still.kind === kind && stillToDo(still.id, still.status === 'skipped' || stillDoneInView(still)))
+})).filter(group => group.stills.length))
+async function saveStill(still: Row<'still_shots'>, patch: { status: string, photos_filmed: number }) {
+  const ok = await run(async () => {
+    must(await db.from('still_shots').update(patch).eq('id', still.id))
+    Object.assign(still, patch)
+  })
+  if (ok) await afterTick(patch.status)
+}
+function stillPhotoChanged(still: Row<'still_shots'>) {
+  keep(still.id)
+  const total = stillOwnersAll(still).reduce((sum, owner) => sum + stillSlots(still, owner.id).length, 0)
+  saveStill(still, { photos_filmed: total, status: still.status === 'skipped' ? 'skipped' : stillDone(still) ? 'filmed' : 'planned' })
+}
+function skipStill(still: Row<'still_shots'>) {
+  if (!isAdmin.value) return
+  keep(still.id)
+  saveStill(still, {
+    photos_filmed: still.photos_filmed,
+    status: still.status === 'skipped' ? (stillDone(still) ? 'filmed' : 'planned') : 'skipped'
+  })
+}
+const stillPhotoFolder = (still: Row<'still_shots'>, ownerId: string) => `${stillFolder(bundle.value, still.kind as 'product' | 'avatar', ownerId)}/`
+const stillPhotoLabel = (still: Row<'still_shots'>, owner: string, index: number) => `${owner} photo ${index + 1} of ${still.description || 'this still'}`
 
 </script>
 
@@ -775,9 +830,89 @@ function skipBroll(shot: Row<'broll_shots'>) {
         </div>
       </div>
     </section>
+
+    <!-- stills for static ads: photos per channel (product) or per person (avatar) -->
+    <section v-if="showStills && stillGroups.length" class="mt-8">
+      <h2 class="mb-2 text-sm font-semibold text-highlighted uppercase">
+        Stills
+      </h2>
+      <div v-for="group in stillGroups" :key="group.kind" class="mb-4">
+        <h3 class="mb-1.5 text-xs font-medium text-muted uppercase">
+          {{ group.title }}
+        </h3>
+        <div class="space-y-1.5">
+          <div
+            v-for="still in group.stills"
+            :key="still.id"
+            class="rounded-lg border border-default px-3 py-2"
+            :class="{
+              'border-success/40 bg-success/5': stillDoneInView(still),
+              'opacity-60': still.status === 'skipped'
+            }"
+          >
+            <div class="flex items-start gap-3">
+              <div class="min-w-0 flex-1">
+                <p class="text-highlighted" :class="{ 'line-through': still.status === 'skipped' }">
+                  {{ still.description || 'Untitled still' }}
+                </p>
+                <p class="text-xs text-muted">
+                  {{ still.count }} photo{{ still.count === 1 ? '' : 's' }} per {{ still.kind === 'product' ? 'channel' : 'person' }}
+                  · {{ stillOwnersAll(still).length - stillsShort(still).length }}/{{ stillOwnersAll(still).length }} done
+                </p>
+                <p
+                  v-if="still.status !== 'skipped' && stillsShort(still).length && stillsShort(still).length < stillOwnersAll(still).length"
+                  class="text-xs"
+                  :class="stillDoneInView(still) ? 'text-warning' : 'text-muted'"
+                >
+                  Still needed from {{ stillsShort(still).join(', ') }}
+                </p>
+              </div>
+              <UButton
+                v-if="isAdmin"
+                :label="still.status === 'skipped' ? 'Unskip' : 'Skip'"
+                size="sm"
+                color="neutral"
+                :variant="still.status === 'skipped' ? 'solid' : 'ghost'"
+                @click="skipStill(still)"
+              />
+            </div>
+            <div v-for="owner in stillOwners(still)" :key="owner.id" class="mt-2">
+              <div v-if="still.status !== 'skipped'" class="flex flex-wrap items-center gap-2">
+                <UBadge :label="owner.name" color="neutral" variant="outline" size="sm" class="w-24 justify-center truncate" />
+                <span class="text-xs text-muted tabular-nums">{{ stillSlots(still, owner.id).length }}/{{ still.count }}</span>
+                <ClipCapture
+                  v-if="nextStillSlot(still, owner.id) !== null"
+                  part="actions"
+                  photo
+                  :shoot="shoot.code"
+                  :target="clipTarget.still(still.id, owner.id, nextStillSlot(still, owner.id)!)"
+                  :path="stillPhotoFolder(still, owner.id)"
+                  :label="stillPhotoLabel(still, owner.name, nextStillSlot(still, owner.id)!)"
+                  :spot-info="(target: string) => clipSpotInfo(bundle, target)"
+                  @saved="stillPhotoChanged(still)"
+                  @removed="stillPhotoChanged(still)"
+                />
+              </div>
+              <ClipCapture
+                v-for="index in stillSlots(still, owner.id)"
+                :key="index"
+                part="clip"
+                photo
+                class="mt-2"
+                :shoot="shoot.code"
+                :target="clipTarget.still(still.id, owner.id, index)"
+                :path="stillPhotoFolder(still, owner.id)"
+                :label="stillPhotoLabel(still, owner.name, index)"
+                @removed="stillPhotoChanged(still)"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
     </fieldset>
 
-    <p v-if="!sections.length && !(showBroll && brollGroups.length)" class="py-16 text-center text-muted">
+    <p v-if="!sections.length && !(showBroll && brollGroups.length) && !(showStills && stillGroups.length)" class="py-16 text-center text-muted">
       <template v-if="notOnShoot">
         You're not on this shoot's cast, so there's nothing for you to film.
       </template>

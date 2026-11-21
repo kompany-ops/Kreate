@@ -288,6 +288,7 @@ async function removeInvite(row: Row<'org_invites'>) {
 // --- defaults --------------------------------------------------------------
 const defaults = reactive({
   default_submission_rate: 5,
+  default_static_submission_rate: 5,
   minutes_per_hook: 4.5,
   minutes_per_cta_sync: 3,
   minutes_per_vo: 9,
@@ -313,6 +314,7 @@ watch(settings, (value) => {
   if (!value) return
   Object.assign(defaults, {
     default_submission_rate: Math.round(Number(value.default_submission_rate) * 1000) / 10,
+    default_static_submission_rate: Math.round(Number(value.default_static_submission_rate) * 1000) / 10,
     minutes_per_hook: Number(value.minutes_per_hook),
     minutes_per_cta_sync: Number(value.minutes_per_cta_sync),
     minutes_per_vo: Number(value.minutes_per_vo),
@@ -347,6 +349,7 @@ const clipCheckFields = [
 
 const defaultFields = [
   { key: 'default_submission_rate', label: 'Default batch size', unit: '%', help: 'Share of a shoot\'s valid recipes each batch renders and submits; each shoot can change it' },
+  { key: 'default_static_submission_rate', label: 'Default static batch size', unit: '%', help: 'Share of a shoot\'s valid static recipes each static batch submits; each shoot can change it' },
   { key: 'minutes_per_hook', label: 'Minutes per hook', unit: 'min', help: 'On camera' },
   { key: 'minutes_per_cta_sync', label: 'Minutes per sync CTA', unit: 'min', help: 'On camera' },
   { key: 'minutes_per_vo', label: 'Minutes per VO', unit: 'min', help: 'Recorded off set' },
@@ -389,6 +392,7 @@ async function saveDefaults() {
     must(await db.from('settings').update({
       ...defaults,
       default_submission_rate: defaults.default_submission_rate / 100,
+      default_static_submission_rate: defaults.default_static_submission_rate / 100,
       general_broll: parseSuggestions(generalBroll.value) as unknown as Json,
       ...clipChecks,
       vo_min_share: clipChecks.vo_min_share / 100,

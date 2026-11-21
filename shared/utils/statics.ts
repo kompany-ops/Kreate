@@ -1,8 +1,11 @@
 // Static ads (docs/spec-statics.md): the shapes and rules shared by the Library's Statics tab, the
 // shoot, the static recipe builder and the AI connector, so each reads and writes them the same way.
 // Pure: no database calls here (staticPlan.ts does the writes).
+import type { Row } from '../types/models'
 import { parseCsv, headerKey } from './brandImport'
-import { countWords } from './slots'
+import type { SlotContext } from './slots'
+import { buildSlotContext, countWords, renderScript } from './slots'
+import { parseSlotValues } from './orgProfile'
 
 /** what the AI connector tags its drafts with, until a person saves them */
 export const AI_DRAFT_TAG = 'ai-draft'
@@ -290,4 +293,143 @@ export function cleanKitFonts(fonts: Partial<KitFont>[]): KitFont[] {
     out.push({ role, family, file: font.file ?? null })
   }
   return out
+}
+
+// --- a shoot's statics (§4, §5) ----------------------------------------------------------------
+
+/** One slot's copy: its first wording and any others (mixed into recipes up to the wording mixes). */
+export interface CopySlot { slot: string, text: string, alternates: { text: string }[] }
+
+export function parseCopySlots(value: unknown): CopySlot[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    const slot = entry && typeof entry === 'object' ? entry as Record<string, unknown> : null
+    const key = text(slot?.slot)
+    if (!key) return []
+    const alternates = Array.isArray(slot?.alternates)
+      ? slot.alternates.flatMap((alt) => {
+          const value = text((alt as { text?: unknown } | null)?.text)
+          return value ? [{ text: value }] : []
+        })
+      : []
+    return [{ slot: key, text: typeof slot?.text === 'string' ? slot.text.trim() : '', alternates }]
+  })
+}
+
+/**
+ * Copy ready to save against its format: the format's slots in its order (others refused), every
+ * required one with text, other wordings trimmed, without repeats or one equal to the first.
+ */
+export function cleanCopySlots(formatSlots: StaticSlot[], input: { slot: string, text?: string | null, alternates?: ({ text?: string | null } | string)[] }[]): CopySlot[] {
+  const unknown = input.filter(entry => !formatSlots.some(slot => slot.key === entry.slot)).map(entry => entry.slot)
+  if (unknown.length) throw new Error(`The format has no ${unknown.join(', ')} slot${unknown.length === 1 ? '' : 's'}. Its slots are ${formatSlots.map(slot => slot.key).join(', ') || 'not set yet'}.`)
+  return formatSlots.flatMap((slot) => {
+    const given = input.find(entry => entry.slot === slot.key)
+    const first = given?.text?.trim() ?? ''
+    if (!first && slot.required) throw new Error(`"${slot.label}" needs copy.`)
+    if (!first) return []
+    const alternates = [...new Set((given?.alternates ?? [])
+      .map(alt => (typeof alt === 'string' ? alt : alt.text ?? '').trim())
+      .filter(alt => alt && alt !== first))].map(alt => ({ text: alt }))
+    return [{ slot: slot.key, text: first, alternates }]
+  })
+}
+
+/** What's missing from a copy for its format: required slots without text. */
+export function copyGaps(formatSlots: StaticSlot[], copy: CopySlot[]): string[] {
+  return formatSlots.filter(slot => slot.required && !copy.find(entry => entry.slot === slot.key)?.text.trim()).map(slot => slot.label)
+}
+
+/** The next free copy code on a shoot: A01, A02… */
+export function nextStaticCopyCode(codes: readonly string[]): string {
+  const highest = Math.max(0, ...codes.map(code => Number(code.match(/^A(\d+)$/)?.[1] ?? 0)))
+  return `A${String(highest + 1).padStart(2, '0')}`
+}
+
+/** How many wordings a copy can be read in: every combination of its slots' wordings. */
+export const copyCombinations = (copy: CopySlot[]) => copy.reduce((total, slot) => total * (1 + slot.alternates.length), 1)
+
+export const STILL_KINDS = ['product', 'avatar'] as const
+export type StillKind = typeof STILL_KINDS[number]
+/** Which stills a shoot needs from the variants of its static formats. */
+export function stillsNeeded(variants: readonly string[]): Record<StillKind, boolean> {
+  return {
+    product: variants.some(variant => variant.includes('product')),
+    avatar: variants.some(variant => variant.includes('avatar'))
+  }
+}
+/**
+ * The stills to suggest (§5): a product hero and a product in hand for product variants; a portrait,
+ * a person holding the product and, on channels with a dog, the person with the dog, for avatar ones.
+ */
+export function suggestedStills(kind: StillKind, withDog = false): string[] {
+  return kind === 'product'
+    ? ['Product hero: the pack on a clean surface, label to camera', 'The product in your hand, label to camera']
+    : ['Portrait, face to camera, plain background', 'You holding the product, smiling to camera', ...(withDog ? ['You with your dog, both looking to camera'] : [])]
+}
+export const MIN_STILL_SHORT_SIDE = 1080
+
+/** A shoot's statics, loaded with it: its static formats, its copy and its stills. */
+export interface BundleStatics {
+  formats: Row<'static_formats'>[]
+  copies: Row<'static_copies'>[]
+  stills: Row<'still_shots'>[]
+}
+
+/** A copy with its slots filled for one channel ({{brand}}, {{product}}, channel and custom slots). */
+export function renderCopy(copy: CopySlot[], context: SlotContext): { slots: { slot: string, text: string, alternates: string[] }[], unfilled: string[] } {
+  const unfilled = new Set<string>()
+  const fill = (value: string) => {
+    const result = renderScript(value, context)
+    for (const slot of result.unfilled) unfilled.add(slot)
+    return result.text
+  }
+  return {
+    slots: copy.map(slot => ({ slot: slot.slot, text: fill(slot.text), alternates: slot.alternates.map(alt => fill(alt.text)) })),
+    unfilled: [...unfilled]
+  }
+}
+
+interface StaticsBundle {
+  shoot: { slot_values?: unknown }
+  brand: { name: string }
+  product: { name: string }
+  channels: { id: string, name: string, slot_values?: unknown }[]
+  statics?: BundleStatics
+}
+
+/** The channels a copy is for: its cast channel, or every channel on the shoot. */
+export const copyChannels = <T extends { id: string }>(channels: T[], copy: Pick<Row<'static_copies'>, 'cast_channel_id'>) =>
+  copy.cast_channel_id ? channels.filter(channel => channel.id === copy.cast_channel_id) : channels
+
+/** The slot context for a channel, as scripts fill it. */
+export function copyContext(bundle: StaticsBundle, channel: { slot_values?: unknown }): SlotContext {
+  return buildSlotContext({
+    brand: bundle.brand.name,
+    product: bundle.product.name,
+    channelValues: parseSlotValues(channel.slot_values),
+    slotValues: bundle.shoot.slot_values
+  })
+}
+
+/** What about a shoot's statics stops it being planned, in words a person can act on. */
+export function staticBlockers(bundle: StaticsBundle): string[] {
+  const statics = bundle.statics
+  if (!statics?.formats.length) return []
+  const list: string[] = []
+  const bare = statics.formats.filter(format => !statics.copies.some(copy => copy.static_format_id === format.id))
+  if (bare.length) list.push(`Write copy for ${bare.map(format => format.code).join(', ')} (Statics)`)
+  const gaps = statics.copies.flatMap((copy) => {
+    const format = statics.formats.find(entry => entry.id === copy.static_format_id)
+    const missing = format ? copyGaps(parseStaticSlots(format.slots), parseCopySlots(copy.slots)) : []
+    return missing.length ? [`${copy.code} (${missing.join(', ')})`] : []
+  })
+  if (gaps.length) list.push(`Fill the required copy in ${gaps.join(', ')}`)
+  const unfilled = statics.copies.filter(copy => copyChannels(bundle.channels, copy)
+    .some(channel => renderCopy(parseCopySlots(copy.slots), copyContext(bundle, channel)).unfilled.length))
+  if (unfilled.length) list.push(`Fill the slots in ${unfilled.map(copy => copy.code).join(', ')} (Statics)`)
+  const needs = stillsNeeded(statics.formats.flatMap(format => format.variants))
+  if (needs.product && !statics.stills.some(still => still.kind === 'product')) list.push('Add product stills (Statics): a format has a product variant')
+  if (needs.avatar && !statics.stills.some(still => still.kind === 'avatar')) list.push('Add avatar stills (Statics): a format has a person variant')
+  return list
 }

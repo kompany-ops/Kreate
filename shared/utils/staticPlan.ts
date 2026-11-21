@@ -4,11 +4,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '../types/database.types'
 import type { Row } from '../types/models'
-import type { KitColor, KitFont, KitLogo, StaticReference, StaticRules, StaticSlot } from './statics'
+import type { LoadedShoot } from './loadShoot'
+import type { KitColor, KitFont, KitLogo, StaticReference, StaticRules, StaticSlot, StillKind } from './statics'
 import {
-  cleanKitColors, cleanKitFonts, cleanStaticRules, cleanStaticSizes, cleanStaticSlots, cleanStaticVariants, KIT_LOGO_USES,
-  nextStaticFormatCode, parseBrandKit, parseStaticReferences, STATIC_TEXT_RENDERS
+  cleanCopySlots, cleanKitColors, cleanKitFonts, cleanStaticRules, cleanStaticSizes, cleanStaticSlots, cleanStaticVariants, KIT_LOGO_USES,
+  nextStaticCopyCode, nextStaticFormatCode, parseBrandKit, parseStaticReferences, parseStaticSlots, STATIC_TEXT_RENDERS, STILL_KINDS,
+  stillsNeeded, suggestedStills
 } from './statics'
+import { parseSlotValues } from './orgProfile'
 
 type Db = SupabaseClient<Database>
 
@@ -198,4 +201,124 @@ export async function signedBrandKitFiles(db: Db, paths: string[], seconds = 360
   const { data, error } = await db.storage.from(BRAND_KITS_BUCKET).createSignedUrls(paths, seconds)
   if (error) throw new Error(error.message)
   return Object.fromEntries((data ?? []).flatMap(entry => entry.path && entry.signedUrl ? [[entry.path, entry.signedUrl] as const] : []))
+}
+
+// --- a shoot's statics (§4, §5) ---------------------------------------------------------------
+
+function requireDraft(bundle: LoadedShoot, what: string) {
+  if (bundle.shoot.status !== 'draft') throw new Error(`The shoot is planned: put it back to draft to change ${what}.`)
+}
+const staticsOf = (bundle: LoadedShoot) => bundle.statics ?? { formats: [], copies: [], stills: [] }
+
+/**
+ * Add static formats to a draft shoot. The first format needing product or avatar stills adds the
+ * suggested stills for it (§5), if the shoot has none of that kind yet. Returns how many were added.
+ */
+export async function addShootStaticFormats(db: Db, bundle: LoadedShoot, formatIds: string[]): Promise<number> {
+  requireDraft(bundle, 'its static formats')
+  const statics = staticsOf(bundle)
+  const fresh = [...new Set(formatIds)].filter(id => !statics.formats.some(format => format.id === id))
+  if (!fresh.length) return 0
+  const rows = check(await db.from('static_formats').select('id, variants, archived').in('id', fresh)) ?? []
+  if (rows.some(row => row.archived)) throw new Error('Archived static formats can\'t be added to a shoot.')
+  if (rows.length < fresh.length) throw new Error('One of those static formats isn\'t in this organisation.')
+  check(await db.from('shoot_static_formats').insert(fresh.map(id => ({ shoot_id: bundle.shoot.id, static_format_id: id }))))
+
+  const before = stillsNeeded(statics.formats.flatMap(format => format.variants))
+  const after = stillsNeeded([...statics.formats.flatMap(format => format.variants), ...rows.flatMap(row => row.variants)])
+  const withDog = bundle.channels.some(channel => !!parseSlotValues(channel.slot_values).dog)
+  const suggestions = STILL_KINDS
+    .filter(kind => after[kind] && !before[kind] && !statics.stills.some(still => still.kind === kind))
+    .flatMap(kind => suggestedStills(kind, withDog).map(description => ({ kind, description })))
+  if (suggestions.length) await addStillShots(db, bundle, suggestions)
+  return fresh.length
+}
+
+/** Take a static format off a draft shoot, with the copy written for it. */
+export async function removeShootStaticFormat(db: Db, bundle: LoadedShoot, formatId: string) {
+  requireDraft(bundle, 'its static formats')
+  check(await db.from('shoot_static_formats').delete().eq('shoot_id', bundle.shoot.id).eq('static_format_id', formatId))
+}
+
+export interface StaticCopyInput {
+  static_format_id?: string
+  slots?: { slot: string, text?: string | null, alternates?: ({ text?: string | null } | string)[] }[]
+  feature_id?: string | null
+  person_id?: string | null
+  cast_channel_id?: string | null
+  tags?: string[]
+  notes?: string | null
+}
+
+/** Write static copy for one of the shoot's static formats (the next A## code), or change it by id. */
+export async function saveStaticCopy(db: Db, bundle: LoadedShoot, input: StaticCopyInput, id?: string): Promise<Row<'static_copies'>> {
+  requireDraft(bundle, 'its static copy')
+  const statics = staticsOf(bundle)
+  const existing = id ? statics.copies.find(copy => copy.id === id) : undefined
+  if (id && !existing) throw new Error('That copy isn\'t on this shoot.')
+  const format = statics.formats.find(entry => entry.id === (input.static_format_id ?? existing?.static_format_id))
+  if (!format) throw new Error('Add the static format to the shoot first.')
+  const fields: Partial<Row<'static_copies'>> = {}
+  if (input.static_format_id !== undefined) fields.static_format_id = format.id
+  if (input.slots !== undefined) fields.slots = cleanCopySlots(parseStaticSlots(format.slots), input.slots) as unknown as Json
+  if (input.feature_id !== undefined) fields.feature_id = input.feature_id
+  if (input.person_id !== undefined) fields.person_id = input.person_id
+  if (input.cast_channel_id !== undefined) fields.cast_channel_id = input.cast_channel_id
+  if (input.tags !== undefined) fields.tags = [...new Set(input.tags.map(tag => tag.trim().toLowerCase()).filter(Boolean))]
+  if (input.notes !== undefined) fields.notes = input.notes?.trim() || null
+  if (existing) return one(await db.from('static_copies').update(fields).eq('id', existing.id).select('*').maybeSingle(), 'That copy')
+  return one(await db.from('static_copies').insert({
+    ...fields,
+    slots: fields.slots ?? cleanCopySlots(parseStaticSlots(format.slots), []) as unknown as Json,
+    shoot_id: bundle.shoot.id,
+    static_format_id: format.id,
+    product_id: bundle.product.id,
+    code: nextStaticCopyCode(statics.copies.map(copy => copy.code)),
+    sort_order: statics.copies.length
+  }).select('*').single(), 'The new copy')
+}
+
+export async function removeStaticCopy(db: Db, bundle: LoadedShoot, id: string) {
+  requireDraft(bundle, 'its static copy')
+  check(await db.from('static_copies').delete().eq('id', id))
+}
+
+export interface StillShotInput { kind?: StillKind, description?: string, feature_id?: string | null, count?: number }
+
+/** Add stills to a draft shoot's list. */
+export async function addStillShots(db: Db, bundle: LoadedShoot, shots: StillShotInput[]) {
+  requireDraft(bundle, 'its stills')
+  const start = staticsOf(bundle).stills.length
+  const rows = shots.map((shot, index) => {
+    if (!shot.kind || !STILL_KINDS.includes(shot.kind)) throw new Error('A still is of the product or of a person (avatar).')
+    if (!shot.description?.trim()) throw new Error('Describe each still.')
+    return {
+      shoot_id: bundle.shoot.id,
+      kind: shot.kind,
+      description: shot.description.trim(),
+      feature_id: shot.kind === 'product' ? shot.feature_id ?? null : null,
+      count: Math.min(20, Math.max(1, Math.round(shot.count ?? 3))),
+      sort_order: start + index
+    }
+  })
+  if (rows.length) check(await db.from('still_shots').insert(rows))
+}
+
+/** Change a still: its description, feature or how many photos it wants. */
+export async function updateStillShot(db: Db, bundle: LoadedShoot, id: string, input: StillShotInput) {
+  const still = staticsOf(bundle).stills.find(entry => entry.id === id)
+  if (!still) throw new Error('That still isn\'t on this shoot.')
+  const fields: Partial<Row<'still_shots'>> = {}
+  if (input.description !== undefined) {
+    if (!input.description.trim()) throw new Error('Describe the still.')
+    fields.description = input.description.trim()
+  }
+  if (input.feature_id !== undefined) fields.feature_id = still.kind === 'product' ? input.feature_id : null
+  if (input.count !== undefined) fields.count = Math.min(20, Math.max(1, Math.round(input.count)))
+  if (Object.keys(fields).length) check(await db.from('still_shots').update(fields).eq('id', id))
+}
+
+export async function removeStillShots(db: Db, bundle: LoadedShoot, ids: string[]) {
+  requireDraft(bundle, 'its stills')
+  if (ids.length) check(await db.from('still_shots').delete().in('id', ids))
 }

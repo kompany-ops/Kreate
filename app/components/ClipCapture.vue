@@ -38,6 +38,8 @@ const props = withDefaults(defineProps<{
   script?: string | null
   /** places any target on the shoot (its shot and name), to warn when one file is used for two shots */
   spotInfo?: (target: string) => ClipSpotInfo | null
+  /** a photo (a still for static ads) instead of a video: checked for size only */
+  photo?: boolean
 }>(), { part: 'all', rules: () => DEFAULT_CLIP_RULES, expectedSeconds: 0, size: 'sm' })
 
 // A saved clip is what ticks a deliverable off: `saved` when this target gains one,
@@ -60,6 +62,16 @@ const checking = ref(false)
 
 /** Measure the clip and run the sanity checks: its picture, and a voiceover's length against its script. */
 async function check(file: File) {
+  // a still only needs to be big enough (statics spec §5); anything else saves without asking
+  if (props.photo) {
+    const size = await measureImage(file)
+    const short = Math.min(size.width, size.height)
+    return {
+      details: size.width ? `${size.width}×${size.height}` : null,
+      issues: size.width && short < MIN_STILL_SHORT_SIDE ? [`It's ${short} px on its short side: stills need at least ${MIN_STILL_SHORT_SIDE} px.`] : [],
+      duration: null
+    }
+  }
   const measure = await measureVideo(file)
   const length = { duration: measure.duration, expectedSeconds: props.expectedSeconds }
   const voiceover = props.expectedSeconds > 0
@@ -91,7 +103,7 @@ async function send(file: File) {
   checking.value = true
   const checked = await check(file).finally(() => (checking.value = false))
   if (checked.issues.length && !(await confirmDialog({
-    title: 'This clip looks off',
+    title: props.photo ? 'This photo looks small' : 'This clip looks off',
     description: `${checked.issues.map(issue => `• ${issue}`).join('\n')}\n\nSave it anyway, or cancel and pick another.`,
     confirmLabel: 'Save anyway'
   }))) return
@@ -175,7 +187,7 @@ const badge = computed(() => {
       <input
         ref="pickInput"
         type="file"
-        accept="video/*"
+        :accept="props.photo ? 'image/*' : 'video/*'"
         class="hidden"
         @change="onPick"
       >
@@ -201,7 +213,7 @@ const badge = computed(() => {
         :aria-label="clip ? `Replace the clip for ${props.label}` : other ? `${props.label}: added on ${otherPhone}` : `Add a clip for ${props.label}`"
         @click="pickInput?.click()"
       >
-        <span class="hidden sm:inline">{{ clip ? 'Replace' : other ? 'Added' : 'Add clip' }}</span>
+        <span class="hidden sm:inline">{{ clip ? 'Replace' : other ? 'Added' : props.photo ? 'Add photo' : 'Add clip' }}</span>
       </UButton>
     </template>
 
@@ -226,7 +238,7 @@ const badge = computed(() => {
 
     <div v-if="showClip && clip" class="space-y-2 rounded-md border border-default p-2">
       <div class="flex items-center gap-2">
-        <UIcon name="i-lucide-file-video" class="size-5 shrink-0 text-muted" />
+        <UIcon :name="props.photo ? 'i-lucide-file-image' : 'i-lucide-file-video'" class="size-5 shrink-0 text-muted" />
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium text-highlighted">
             {{ clip.name }}

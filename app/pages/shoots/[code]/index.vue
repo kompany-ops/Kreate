@@ -52,9 +52,9 @@ const busy = ref(false)
 
 // --- tabs ------------------------------------------------------------------
 // General (setup, slots, what's left to do), Formats, then the video in order: Hooks, VOs
-// (written here), CTAs, and B-roll. A Live shoot opens on Batches. The open tab lives in the URL
+// (written here), CTAs, and B-roll; then Statics (static ads). A Live shoot opens on Batches. The open tab lives in the URL
 // so it survives reloads and can be linked.
-const TAB_VALUES = ['batches', 'general', 'formats', 'hooks', 'vos', 'ctas', 'broll'] as const
+const TAB_VALUES = ['batches', 'general', 'formats', 'hooks', 'vos', 'ctas', 'broll', 'statics'] as const
 type ShootTab = typeof TAB_VALUES[number]
 const defaultTab = computed<ShootTab>(() => live.value ? 'batches' : 'general')
 const tab = computed<ShootTab>({
@@ -68,7 +68,8 @@ const tabItems = computed(() => [
   { label: 'Hooks', value: 'hooks', icon: 'i-lucide-anchor', badge: groupsOf('hook').length || undefined },
   { label: 'VOs', value: 'vos', icon: 'i-lucide-mic', badge: groupsOf('body').length || undefined },
   { label: 'CTAs', value: 'ctas', icon: 'i-lucide-megaphone', badge: groupsOf('cta').length || undefined },
-  { label: 'B-roll', value: 'broll', icon: 'i-lucide-film', badge: bundle.value.broll.length || undefined }
+  { label: 'B-roll', value: 'broll', icon: 'i-lucide-film', badge: bundle.value.broll.length || undefined },
+  { label: 'Statics', value: 'statics', icon: 'i-lucide-image', badge: bundle.value.statics?.formats.length || undefined }
 ].map(item => ({ ...item, badge: item.badge === undefined ? undefined : { label: String(item.badge), color: 'neutral' as const, variant: 'subtle' as const } })))
 
 // --- setup -----------------------------------------------------------------
@@ -1250,6 +1251,9 @@ const actionItems = computed<DropdownMenuItem[][]>(() => {
             </p>
           </template>
         </UCard>
+
+        <!-- Statics: static formats, their copy, and the stills to take (docs/spec-statics.md) -->
+        <PlannerStatics v-else-if="tab === 'statics'" :bundle="bundle" :draft="isDraft" :live="live" @changed="refresh" />
 
         <!-- B-roll: shots to film for each format's beats, plus general product shots -->
         <UCard v-else>

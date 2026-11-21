@@ -115,7 +115,7 @@ export async function loadShootBundle(db: SupabaseClient<Database>, code: string
   const { product: productWithBrand, ...shoot } = found
   const { brand, ...product } = productWithBrand
 
-  const [people, channels, items, broll, links, planned, treatments, settings] = await Promise.all([
+  const [people, channels, items, broll, links, planned, treatments, settings, staticFormats, staticCopies, stills] = await Promise.all([
     db.from('shoot_people').select('person:people(*)').eq('shoot_id', shoot.id),
     db.from('shoot_channels').select('channel:channels(*)').eq('shoot_id', shoot.id),
     db.from('shoot_items').select(ITEM_SELECT).eq('shoot_id', shoot.id).order('sort_order').order('created_at'),
@@ -123,7 +123,10 @@ export async function loadShootBundle(db: SupabaseClient<Database>, code: string
     db.from('person_channels').select('person_id, channel_id'),
     db.from('shoot_formats').select('format:formats(id, code, name, description, beats, beat_descriptions, beat_examples, beat_broll, kind, beat_display, source_url)').eq('shoot_id', shoot.id),
     loadTreatmentRows(db),
-    db.from('settings').select('channel_slots').limit(1).maybeSingle()
+    db.from('settings').select('channel_slots').limit(1).maybeSingle(),
+    db.from('shoot_static_formats').select('format:static_formats(*)').eq('shoot_id', shoot.id),
+    db.from('static_copies').select('*').eq('shoot_id', shoot.id).order('code'),
+    db.from('still_shots').select('*').eq('shoot_id', shoot.id).order('sort_order').order('created_at')
   ])
 
   const peopleRows = unwrap(people).map(row => row.person as Row<'people'>).sort((a, b) => a.name.localeCompare(b.name))
@@ -141,7 +144,12 @@ export async function loadShootBundle(db: SupabaseClient<Database>, code: string
     plannedFormats: unwrap(planned).map(row => row.format as unknown as PlannedFormat).filter(Boolean),
     treatments: treatmentsFrom(treatments, shoot.treatments_off),
     treatmentChoices: treatments.filter(row => row.active).map(row => ({ id: row.id, name: row.name, description: row.description, off: shoot.treatments_off.includes(row.id) })),
-    channelSlots: parseChannelSlots(unwrap(settings)?.channel_slots).map(slot => slot.name)
+    channelSlots: parseChannelSlots(unwrap(settings)?.channel_slots).map(slot => slot.name),
+    statics: {
+      formats: unwrap(staticFormats).map(row => row.format as unknown as Row<'static_formats'>).filter(Boolean).sort((a, b) => a.code.localeCompare(b.code)),
+      copies: unwrap(staticCopies),
+      stills: unwrap(stills)
+    }
   }
 }
 
