@@ -126,6 +126,8 @@ const differsByChannel = (copy: Row<'static_copies'>) => new Set(filled(copy).ma
 const channelItems = computed(() => [{ label: 'Every channel', value: null }, ...props.bundle.channels.map(channel => ({ label: channel.name, value: channel.id }))])
 const featureItems = computed(() => [{ label: 'No feature', value: null }, ...features.value])
 const wordings = (slots: CopySlot[]) => copyCombinations(slots)
+/** "{{offer}}, {{dog}}": built in script, since braces can't sit inside a template's {{ }} */
+const slotList = (slots: string[]) => slots.map(slot => `{{${slot}}}`).join(', ')
 
 // --- stills -------------------------------------------------------------------------------------
 const needs = computed(() => stillsNeeded(statics.value.formats.flatMap(format => format.variants)))
@@ -263,7 +265,7 @@ const settingsChanged = computed(() => settingsForm.wording !== props.bundle.sho
                 </p>
               </div>
               <p v-for="entry in filled(copy).filter(item => item.unfilled.length)" :key="`u-${entry.channel}`" class="mt-1 text-xs text-warning">
-                {{ entry.channel }}: fill {{ entry.unfilled.map(slot => `{{${slot}}}`).join(', ') }}
+                {{ entry.channel }}: fill {{ slotList(entry.unfilled) }}
               </p>
             </template>
           </div>
