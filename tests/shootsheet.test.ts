@@ -424,7 +424,12 @@ describe('clipSpotInfo', () => {
     expect(clipSpotInfo(b, 'item:i3:product')!.shot).not.toBe(nix.shot)
     expect(clipSpotInfo(b, 'item:i1')!.label).toBe('H01 · Joe · topdognix')
     b.broll[0] = { ...b.broll[0]!, id: 's1' }
-    expect(clipSpotInfo(b, 'broll:s1:c2:0')).toEqual({ shot: 'broll:s1', label: 'b-roll "anxious pacing" · topdogwhiskey' })
+    expect(clipSpotInfo(b, 'broll:s1:c2:0')).toMatchObject({ shot: 'broll:s1', label: 'b-roll "anxious pacing" · topdogwhiskey' })
+    // b-roll says which format's section it's in, so a clip can be reused in another format's b-roll
+    b.broll[0] = { ...b.broll[0]!, format_id: 'f1' }
+    expect(clipSpotInfo(b, 'broll:s1:c2:0')!.brollFormat).toBe('f1')
+    b.broll[0] = { ...b.broll[0]!, format_id: null }
+    expect(clipSpotInfo(b, 'broll:s1:c2:0')!.brollFormat).toBeNull()
     expect(clipSpotInfo(b, 'item:nope')).toBeNull()
   })
 })

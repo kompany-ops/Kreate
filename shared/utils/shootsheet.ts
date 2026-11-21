@@ -636,7 +636,7 @@ export function brollShortfalls(
 export function clipSpotInfo(
   bundle: Pick<ShootBundle, 'items' | 'broll' | 'people' | 'channels'>,
   target: string
-): { shot: string, label: string } | null {
+): { shot: string, label: string, brollFormat?: string | null } | null {
   const [kind, id, part] = target.split(':')
   const channelName = (channelId: string | null | undefined) => bundle.channels.find(channel => channel.id === channelId)?.name
   if (kind === 'item') {
@@ -654,7 +654,9 @@ export function clipSpotInfo(
     if (!shot) return null
     return {
       shot: `broll:${shot.id}`,
-      label: [`b-roll "${shot.description}"`, channelName(part === 'shared' ? null : part)].filter(Boolean).join(' · ')
+      label: [`b-roll "${shot.description}"`, channelName(part === 'shared' ? null : part)].filter(Boolean).join(' · '),
+      // its format's section (null: general product shots, which go under any VO)
+      brollFormat: shot.format_id ?? null
     }
   }
   return null

@@ -173,6 +173,8 @@ export interface SharedClip {
 export interface ClipSpotInfo {
   shot: string
   label: string
+  /** b-roll only: the format whose section it's in (null: general product shots) */
+  brollFormat?: string | null
 }
 
 const shared = shallowReactive(new Map<string, SharedClip>())
@@ -514,7 +516,8 @@ export const useClipUpload = () => {
     spotInfo: (target: string) => ClipSpotInfo | null
   ): { label: string, by: string | null } | null {
     const shootId = shootIds.get(shoot)
-    const mine = spotInfo(spots[0]!)?.shot
+    const mineInfo = spotInfo(spots[0]!)
+    const mine = mineInfo?.shot
     const candidates: { target: string, name: string, size: number | null, by: string | null }[] = [
       ...[...clips.entries()].filter(([, clip]) => clip.shoot === shoot).map(([target, clip]) => ({ target, name: clip.name, size: clip.size, by: null })),
       ...[...shared.entries()].filter(([target, clip]) => clip.shootId === shootId && !clips.has(target))
@@ -524,6 +527,9 @@ export const useClipUpload = () => {
       if (spots.includes(other.target) || other.name !== file.name || (other.size !== null && other.size !== file.size)) continue
       const info = spotInfo(other.target)
       if (info && info.shot === mine) continue
+      // b-roll in two different formats' sections never lands in the same video, so reusing a clip
+      // there is fine; general product shots go under any VO, so they still count
+      if (mineInfo?.brollFormat && info?.brollFormat && mineInfo.brollFormat !== info.brollFormat) continue
       return { label: info?.label ?? 'another shot', by: other.by }
     }
     return null
